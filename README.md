@@ -1,7 +1,7 @@
-# Fujicom
+Fujicom
 ASCOM compliant driver for Fujifilm cameras. 
 
-I made this driver to solve my own problem of not being able to use my GFX camera with NINA, my usual astrophotography software. The code is probably done in a non-optimal way I'm sure, but for now it work. I will be trying to learn more about optimization going forward. 
+I made this driver to solve my own problem of not being able to use my GFX camera with NINA, my usual astrophotography software. The code is probably done in a non-optimal way I'm sure, but for now it work. I will be trying to learn more about optimization going forward, other software may work but NINA is all I've validated. 
 
 While the code has worked for me, I cannot guarantee it will work for you and honestly have no clue how it will behave under different circumstances. 
 
@@ -31,3 +31,14 @@ The limitation on models is not from me, Fujifilm only released header files for
 If in the future more headers are released for me to work with, I can revisit this but until then it would be pracitcally impossible. 
 
 If you happen to use this driver, please let me know if there are any issues encountered, I will try to keep up with development as best I can. 
+
+**INSTALLATION**
+
+To install:
+1) Download the whole repository
+2) Open in visual studio
+3) Clean and build
+4) Open cmd
+5) cd to the repo's debug or release folder, whereever you built it
+6) run ASCOM.ScdouglasFujifilm.exe /register (Any news here is bad news, should run quietly)
+7) Test, ideally on NINA but can be elsewhere 
