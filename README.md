@@ -1,7 +1,7 @@
 # Fujicom
 ASCOM compliant driver for Fujifilm cameras. 
 
-Disclaimer: I am not a formally trained software developer, and have no experience with best practices or optimization of code. 
+I made this driver to solve my own problem of not being able to use my GFX camera with NINA, my usual astrophotography software. The code is probably done in a non-optimal way I'm sure, but for now it work. I will be trying to learn more about optimization going forward. 
 
 While the code has worked for me, I cannot guarantee it will work for you and honestly have no clue how it will behave under different circumstances. 
 
