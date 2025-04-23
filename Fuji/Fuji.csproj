@@ -119,6 +119,15 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
+    <Content Include="CameraConfigs\GFX100S.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="CameraConfigs\X-T3.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
+    <Content Include="CameraConfigs\X-T5.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <None Include="LocalServer.snk" />
   </ItemGroup>
   <ItemGroup>
@@ -164,6 +173,7 @@
       <Name>LibRawWrapper</Name>
     </ProjectReference>
   </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
        Other similar extension points exist, see Microsoft.Common.targets.
