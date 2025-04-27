@@ -188,6 +188,9 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
         // Shutter Speed
         public const int XSDK_SHUTTER_BULB = -1;
+        // *** ADDED: Constant for Time (T) mode - Use a distinct value if needed, but SDK likely uses regular codes ***
+        // We'll use the longest mapped code instead of a specific T-mode code.
+        // public const int XSDK_SHUTTER_TIME = -2; // Example, not a real SDK value
 
         // Dynamic Range (From SDK PDF p.142)
         public const int XSDK_DRANGE_AUTO = 0xFFFF;
@@ -547,7 +550,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         private static Dictionary<double, int> durationToSdkShutterSpeed = new Dictionary<double, int>();
         private static List<int> supportedShutterSpeeds = new List<int>(); // *** Will be populated by SDK ***
         private static double minExposure = 0.0001; // *** Default, updated by SDK ***
-        private static double maxExposure = 3600.0; // *** Default, updated by SDK ***
+        private static double maxExposure = 60.0; // *** MODIFIED: Default max programmed exposure, T-mode handles longer ***
         private static bool bulbCapable = true; // *** Default, updated by SDK ***
         private static object lastImageArray = null;
         #endregion
@@ -1099,27 +1102,25 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
         public static double SetCCDTemperature { get => throw new PropertyNotImplementedException("SetCCDTemperature", false); set => throw new PropertyNotImplementedException("SetCCDTemperature", true); }
 
-        // *** MODIFIED StartExposure ***
+        // *** REVERTED StartExposure to always use SDK Bulb sequence for long exposures ***
         public static void StartExposure(double duration, bool light)
         {
             CheckConnected("StartExposure");
 
-            // *** ADDED: Reset from error state if necessary ***
-            lock (exposureLock) // Lock needed to safely check and modify cameraState
+            // Reset from error state if necessary
+            lock (exposureLock)
             {
                 if (cameraState == CameraStates.cameraError)
                 {
                     LogMessage("StartExposure", $"Camera was in error state. Resetting to Idle.");
                     cameraState = CameraStates.cameraIdle;
-                    imageReady = false; // Ensure imageReady is also reset
+                    imageReady = false;
                     lastImageArray = null;
                 }
             }
-            // *** END ADDED ***
 
             lock (exposureLock)
             {
-                // Now perform the original check
                 if (cameraState != CameraStates.cameraIdle) throw new InvalidOperationException($"Camera not idle. State: {cameraState}");
 
                 LogMessage("StartExposure", $"Request: Duration={duration}s, Light Frame={light}");
@@ -1127,21 +1128,23 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 // Check against cached min/max exposure values
                 if (duration < minExposure) { LogMessage("StartExposure", $"Requested duration {duration}s is less than minimum {minExposure}s."); throw new InvalidValueException("StartExposure Duration", duration.ToString(), $"Minimum exposure is {minExposure}"); }
 
-                // *** MODIFIED: Check bulbCapable field directly ***
-                if (!bulbCapable && duration > maxExposure)
-                {
-                    LogMessage("StartExposure", $"Requested duration {duration}s exceeds max coded exposure {maxExposure}s and Bulb is not supported (bulbCapable={bulbCapable}).");
-                    throw new InvalidValueException("StartExposure Duration", duration.ToString(), $"Bulb mode not supported, maximum exposure is {maxExposure}");
-                }
-                // Note: If bulbCapable is true, we allow durations > maxExposure
+                // Determine if Bulb mode is needed based on max *programmable* exposure
+                bool useBulbSequence = duration > maxExposure;
 
-                IntPtr shotOptPtr = IntPtr.Zero; // Pointer for the long* parameter
-                long shotOptValue = 0;          // Value for the long* parameter (0 = default/no options)
-                bool shotOptAllocated = false;  // Track if we allocated memory
+                // Check if Bulb mode is supported if needed
+                if (useBulbSequence && !bulbCapable)
+                {
+                    LogMessage("StartExposure", $"Error: Long exposure ({duration}s) requested but camera does not support Bulb mode (bulbCapable={bulbCapable}).");
+                    throw new InvalidValueException("StartExposure Duration", duration.ToString(), $"Camera does not support Bulb mode or required duration exceeds limits.");
+                }
+
+                IntPtr shotOptPtr = IntPtr.Zero;
+                long shotOptValue = 0;
+                bool shotOptAllocated = false;
 
                 try
                 {
-                    // Log Current Camera State (same as your file)
+                    // Log Current Camera State
                     try
                     {
                         int currentMode = -1, currentShut = -1, currentBulb = -1, currentIso = -1;
@@ -1161,32 +1164,31 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     }
                     catch (Exception stateEx) { LogMessage("StartExposure", $"Warning: Could not get full camera state before exposure: {stateEx.Message}"); }
 
-                    // --- Set Shutter Speed ---
-                    LogMessage("StartExposure", "Converting duration to SDK code...");
-                    int sdkShutterSpeed = DurationToSdkShutterSpeed(duration); // Gets -1 if bulb needed
-                    int isBulb = (sdkShutterSpeed == FujifilmSdkWrapper.XSDK_SHUTTER_BULB) ? 1 : 0;
+                    int sdkShutterSpeed;
+                    int isBulbFlag;
 
-                    // *** MODIFIED: Check bulbCapable field directly ***
-                    if (isBulb == 1 && !bulbCapable)
+                    if (useBulbSequence)
                     {
-                        LogMessage("StartExposure", $"Error: Bulb exposure requested ({duration}s) but camera config/capabilities indicate Bulb is not supported (bulbCapable={bulbCapable}).");
-                        // Throw a more informative exception if possible
-                        throw new InvalidValueException("StartExposure Duration", duration.ToString(), "Internal Error: Bulb exposure requested but camera capabilities indicate Bulb is not supported.");
+                        // --- Use SDK Bulb Mode ---
+                        LogMessage("StartExposure", "Using SDK Bulb commands.");
+                        sdkShutterSpeed = FujifilmSdkWrapper.XSDK_SHUTTER_BULB; // Use -1
+                        isBulbFlag = 1;
+                        // *** MODIFICATION: DO NOT set shutter speed if using Bulb sequence ***
+                        // LogMessage("StartExposure", $"Setting SDK Shutter Speed Code: {sdkShutterSpeed}, Bulb Flag: {isBulbFlag}");
+                        // int setResult = FujifilmSdkWrapper.XSDK_SetShutterSpeed(hCamera, sdkShutterSpeed, isBulbFlag);
+                        // FujifilmSdkWrapper.CheckSdkError(hCamera, setResult, "XSDK_SetShutterSpeed (Bulb)");
+                        LogMessage("StartExposure", "Skipping XSDK_SetShutterSpeed for Bulb sequence. Assuming physical dial is set to 'B'.");
                     }
-
-                    LogMessage("StartExposure", $"Setting SDK Shutter Speed Code: {sdkShutterSpeed}, Bulb Flag: {isBulb}");
-                    int setResult = FujifilmSdkWrapper.XSDK_SetShutterSpeed(hCamera, sdkShutterSpeed, isBulb);
-                    FujifilmSdkWrapper.CheckSdkError(hCamera, setResult, "XSDK_SetShutterSpeed");
-
-                    // *** REMOVED Bulb state verification step ***
-
-                    // *** Add small delay after setting shutter speed, especially before Bulb start ***
-                    if (isBulb == 1)
+                    else
                     {
-                        LogMessage("StartExposure", "Adding short delay after setting Bulb mode...");
-                        System.Threading.Thread.Sleep(100); // 100ms delay
+                        // --- Use Standard Timed Exposure ---
+                        LogMessage("StartExposure", "Using standard timed exposure commands.");
+                        sdkShutterSpeed = DurationToSdkShutterSpeed(duration); // Gets the specific code
+                        isBulbFlag = 0;
+                        LogMessage("StartExposure", $"Setting SDK Shutter Speed Code: {sdkShutterSpeed}, Bulb Flag: {isBulbFlag}");
+                        int setResult = FujifilmSdkWrapper.XSDK_SetShutterSpeed(hCamera, sdkShutterSpeed, isBulbFlag);
+                        FujifilmSdkWrapper.CheckSdkError(hCamera, setResult, "XSDK_SetShutterSpeed (Timed)");
                     }
-
 
                     // --- Allocate shotOptPtr ---
                     shotOptPtr = Marshal.AllocHGlobal(sizeof(long));
@@ -1199,56 +1201,41 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     int releaseResult;
                     int releaseStatus;
 
-                    if (isBulb == 1)
+                    if (useBulbSequence)
                     {
-                        // *** Sequence for Bulb: S1ON -> BULBS2_ON ***
-
+                        // *** Sequence for SDK Bulb: S1ON -> Delay -> BULBS2_ON ***
                         // 1. Press Halfway (S1ON)
                         releaseModeStart = FujifilmSdkWrapper.XSDK_RELEASE_S1ON; // Use 0x0200
                         LogMessage("StartExposure", $"Triggering S1ON via XSDK_Release (Mode: 0x{releaseModeStart:X}, Options Ptr: {shotOptPtr})...");
                         releaseResult = FujifilmSdkWrapper.XSDK_Release(hCamera, releaseModeStart, shotOptPtr, out releaseStatus);
                         LogMessage("StartExposure", $"XSDK_Release (S1ON) returned {releaseResult}, status={releaseStatus}");
-                        try
-                        {
-                            FujifilmSdkWrapper.CheckSdkError(hCamera, releaseResult, "XSDK_Release (S1ON)");
-                        }
-                        catch (Exception s1Ex)
-                        {
-                            LogMessage("StartExposure", $"Error during S1ON: {s1Ex.Message}. Aborting exposure start.");
-                            throw; // Re-throw S1ON error, cannot proceed
-                        }
+                        try { FujifilmSdkWrapper.CheckSdkError(hCamera, releaseResult, "XSDK_Release (S1ON)"); }
+                        catch (Exception s1Ex) { LogMessage("StartExposure", $"Error during S1ON: {s1Ex.Message}. Aborting exposure start."); throw; }
                         LogMessage("StartExposure", $"SDK Release command (S1ON) sent successfully.");
+
+                        // *** INCREASED DELAY BETWEEN S1ON and BULBS2_ON ***
+                        LogMessage("StartExposure", "Adding increased delay between S1ON and BULBS2_ON...");
+                        System.Threading.Thread.Sleep(500); // Increased to 500ms
 
                         // 2. Start Bulb (BULBS2_ON)
                         releaseModeStart = FujifilmSdkWrapper.XSDK_RELEASE_BULBS2_ON; // Use 0x0500
                         LogMessage("StartExposure", $"Triggering BULBS2_ON via XSDK_Release (Mode: 0x{releaseModeStart:X}, Options Ptr: {shotOptPtr})...");
                         releaseResult = FujifilmSdkWrapper.XSDK_Release(hCamera, releaseModeStart, shotOptPtr, out releaseStatus);
                         LogMessage("StartExposure", $"XSDK_Release (BULBS2_ON) returned {releaseResult}, status={releaseStatus}");
-                        try
-                        {
-                            FujifilmSdkWrapper.CheckSdkError(hCamera, releaseResult, "XSDK_Release (BULBS2_ON - Start)");
-                        }
+                        try { FujifilmSdkWrapper.CheckSdkError(hCamera, releaseResult, "XSDK_Release (BULBS2_ON - Start)"); }
                         catch (Exception bulbStartEx)
                         {
                             LogMessage("StartExposure", $"Error during BULBS2_ON: {bulbStartEx.Message}. Attempting to release S1...");
-                            // Attempt to clean up by releasing S1
-                            try
-                            {
-                                FujifilmSdkWrapper.XSDK_Release(hCamera, FujifilmSdkWrapper.XSDK_RELEASE_N_S1OFF, IntPtr.Zero, out _);
-                            }
-                            catch { /* Ignore errors during cleanup */ }
-                            throw; // Re-throw the original BULBS2_ON error
+                            try { FujifilmSdkWrapper.XSDK_Release(hCamera, FujifilmSdkWrapper.XSDK_RELEASE_N_S1OFF, IntPtr.Zero, out _); } catch { /* Ignore */ }
+                            throw;
                         }
                         LogMessage("StartExposure", $"SDK Release command (BULBS2_ON - Start) sent successfully.");
-
-                        // *** REMOVED EXPERIMENTAL delay after BULBS2_ON ***
-
                     }
-                    else
+                    else // Standard Timed Exposure
                     {
                         // *** Sequence for Timed: SHOOT_S1OFF ***
                         releaseModeStart = FujifilmSdkWrapper.XSDK_RELEASE_SHOOT_S1OFF; // Use 0x0104
-                        LogMessage("StartExposure", $"Triggering timed exposure START via XSDK_Release (Mode: 0x{releaseModeStart:X}, Options Ptr: {shotOptPtr})...");
+                        LogMessage("StartExposure", $"Triggering Timed exposure START via XSDK_Release (Mode: 0x{releaseModeStart:X}, Options Ptr: {shotOptPtr})...");
                         releaseResult = FujifilmSdkWrapper.XSDK_Release(hCamera, releaseModeStart, shotOptPtr, out releaseStatus);
                         LogMessage("StartExposure", $"XSDK_Release (Timed Start) returned {releaseResult}, status={releaseStatus}");
                         FujifilmSdkWrapper.CheckSdkError(hCamera, releaseResult, "XSDK_Release (Timed Start)");
@@ -1268,19 +1255,15 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
                     exposureTimer?.Dispose();
 
-                    // Use different timer callbacks based on bulb mode
-                    if (isBulb == 1)
+                    // Use different timer callbacks based on sequence used
+                    if (useBulbSequence)
                     {
                         LogMessage("StartExposure", $"Starting BULB timer for {exposureMillis} ms (Callback: OnBulbExposureTimerElapsed).");
-                        // Start timer for the exact duration for bulb, stop command will be sent in callback
-                        // *** Pass IntPtr.Zero as state (pointer freed below) ***
                         exposureTimer = new System.Threading.Timer(OnBulbExposureTimerElapsed, null, exposureMillis, Timeout.Infinite);
                     }
-                    else
+                    else // useTimeSequence
                     {
                         LogMessage("StartExposure", $"Starting TIMED timer for {exposureMillis + bufferMillis} ms (Callback: OnExposureComplete).");
-                        // Start timer with buffer for timed exposures, image check happens in callback
-                        // *** Pass IntPtr.Zero as state (pointer freed below) ***
                         exposureTimer = new System.Threading.Timer(OnExposureComplete, null, exposureMillis + bufferMillis, Timeout.Infinite);
                     }
                     LogMessage("StartExposure", $"Exposure timing initiated.");
@@ -1560,8 +1543,9 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     if (validDurations.Count > 0)
                     {
                         minExposure = validDurations.Min();
-                        maxExposure = validDurations.Max(); // This is the max *non-bulb* exposure
-                        LogMessage("CacheCameraCapabilities", $"Exposure Range (Non-Bulb): Min={minExposure}s, Max={maxExposure}s");
+                        // *** MODIFIED: maxExposure now represents the longest *programmable* time ***
+                        maxExposure = validDurations.Max();
+                        LogMessage("CacheCameraCapabilities", $"Exposure Range (Programmable): Min={minExposure}s, Max={maxExposure}s");
                     }
                     else
                     {
@@ -1683,15 +1667,22 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             else
             {
                 // Check bulb capability using the 'bulbCapable' field populated during CacheCameraCapabilities
-                if (bulbCapable && duration > maxExposure) // Use maxExposure determined from the map
+                // ** maxExposure here represents the longest *programmable* shutter speed **
+                if (bulbCapable && duration > maxExposure)
                 {
-                    LogMessage("DurationToSdkShutterSpeed", $"Duration {duration}s > max non-bulb ({maxExposure}s), mapping to BULB (-1).");
-                    return FujifilmSdkWrapper.XSDK_SHUTTER_BULB;
+                    LogMessage("DurationToSdkShutterSpeed", $"Duration {duration}s > max programmable ({maxExposure}s), mapping to BULB/TIME (-1).");
+                    return FujifilmSdkWrapper.XSDK_SHUTTER_BULB; // Return -1 to indicate Bulb/Time needed
                 }
                 LogMessage("DurationToSdkShutterSpeed", $"Duration {duration}s is too far from nearest supported {closestDuration}s (Diff: {minDiff}, Tol: {tolerance}).");
                 throw new InvalidValueException($"Requested duration {duration}s is not supported or too far from nearest value {closestDuration}s.");
             }
         }
+
+        // *** REMOVED: Helper to check if model likely has physical T-dial ***
+        // private static bool IsPhysicalTDialModel(string modelName) { ... }
+
+        // *** REMOVED: Helper to get the SDK code for the longest mapped duration ***
+        // private static int GetMaxMappedSdkShutterCode() { ... }
 
         // *** UPDATED: Timer callback specifically for BULB exposures ***
         private static void OnBulbExposureTimerElapsed(object state)
@@ -1894,7 +1885,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     if (shotOptPtr != IntPtr.Zero) Marshal.FreeHGlobal(shotOptPtr);
                     return;
                 }
-                LogMessage("OnExposureComplete", $"TIMED exposure timer fired for {lastExposureDuration}s. Checking for image availability.");
+                LogMessage("OnExposureComplete", $"TIMED/T-Dial exposure timer fired for {lastExposureDuration}s. Checking for image availability.");
                 CheckForImageData(); // Call the common image check logic
             }
 
