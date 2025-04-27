@@ -17,6 +17,9 @@
 // Fix: Re-implemented GetIntArrayFromSdkSensitivity using a carefully managed
 //      temporary pointer for the first call to XSDK_CapSensitivity to avoid
 //      potential SDK issues with NULL pointers, addressing protected memory errors.
+// Mod: Removed hardcoded GFX100S constants from FujifilmSdkWrapper and replaced
+//      their usage with dynamic lookups from CameraHardware.currentConfig.SdkConstants.
+//      Added null checks for currentConfig and currentConfig.SdkConstants.
 
 using ASCOM;
 using ASCOM.Astrometry.AstroUtils;
@@ -31,6 +34,7 @@ using System.Linq; // Added for Min()/Max() extension methods
 using System.Runtime.InteropServices; // Needed for GCHandle, Marshal
 using System.Threading;
 using System.Windows.Forms;
+using System.Text.Json; // Required for JSON deserialization
 
 // Add using for the C++/CLI Wrapper namespace (adjust if you used a different namespace)
 using Fujifilm.LibRawWrapper; // Assuming this is your C++/CLI wrapper namespace
@@ -40,14 +44,19 @@ namespace ASCOM.ScdouglasFujifilm.Camera
     #region Configuration Classes
     // Configuration classes (SdkConstantConfig, ShutterSpeedMapping, CameraConfig)
     // remain exactly as in the uploaded CameraHardware..cs file.
+    // Ensure SdkConstantConfig includes properties for all needed constants.
     public class SdkConstantConfig
     {
         public int ModeManual { get; set; }
         public int FocusModeManual { get; set; }
         public int ImageQualityRaw { get; set; }
-        public int ImageQualityRawFine { get; set; }
-        public int ImageQualityRawNormal { get; set; }
-        public int ImageQualityRawSuperfine { get; set; }
+        public int ImageQualityRawFine { get; set; } // Example, adjust names as needed
+        public int ImageQualityRawNormal { get; set; } // Example, adjust names as needed
+        public int ImageQualityRawSuperfine { get; set; } // Example, adjust names as needed
+        // Add other necessary constants based on your JSON structure
+        public int ImageQualityFine { get; set; }
+        public int ImageQualityNormal { get; set; }
+        public int ImageQualitySuperfine { get; set; }
     }
     public class ShutterSpeedMapping
     {
@@ -164,20 +173,20 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         // Interfaces
         public const int XSDK_DSC_IF_USB = 1;
 
+        // --- REMOVED Hardcoded GFX100S Constants ---
         // Exposure Modes (From XAPI.H & GFX100S.h)
-        public const int GFX100S_MODE_M = 0x0001; // Manual Exposure Mode (Defined in GFX100S.h as API_CODE_SetMode)
-
+        // public const int GFX100S_MODE_M = 0x0001; // Manual Exposure Mode (Defined in GFX100S.h as API_CODE_SetMode)
         // Focus Modes (From XAPI.H & GFX100S.h)
-        public const int GFX100S_FOCUSMODE_MANUAL = 0x0001; // Manual Focus Mode (Defined in GFX100S.h)
-
+        // public const int GFX100S_FOCUSMODE_MANUAL = 0x0001; // Manual Focus Mode (Defined in GFX100S.h)
         // Image Quality / Format (Examples - Ensure these match GFX100S.h)
-        public const int GFX100S_IMAGEQUALITY_RAW = 1;          // Corresponds to SDK_IMAGEQUALITY_RAW in GFX100S.h
-        public const int GFX100S_IMAGEQUALITY_FINE = 2;         // Corresponds to SDK_IMAGEQUALITY_FINE in GFX100S.h
-        public const int GFX100S_IMAGEQUALITY_NORMAL = 3;       // Corresponds to SDK_IMAGEQUALITY_NORMAL in GFX100S.h
-        public const int GFX100S_IMAGEQUALITY_RAW_FINE = 4;     // Corresponds to SDK_IMAGEQUALITY_RAW_FINE in GFX100S.h
-        public const int GFX100S_IMAGEQUALITY_RAW_NORMAL = 5;   // Corresponds to SDK_IMAGEQUALITY_RAW_NORMAL in GFX100S.h
-        public const int GFX100S_IMAGEQUALITY_SUPERFINE = 6;    // Corresponds to SDK_IMAGEQUALITY_SUPERFINE in GFX100S.h
-        public const int GFX100S_IMAGEQUALITY_RAW_SUPERFINE = 7;// Corresponds to SDK_IMAGEQUALITY_RAW_SUPERFINE in GFX100S.h
+        // public const int GFX100S_IMAGEQUALITY_RAW = 1;          // Corresponds to SDK_IMAGEQUALITY_RAW in GFX100S.h
+        // public const int GFX100S_IMAGEQUALITY_FINE = 2;         // Corresponds to SDK_IMAGEQUALITY_FINE in GFX100S.h
+        // public const int GFX100S_IMAGEQUALITY_NORMAL = 3;       // Corresponds to SDK_IMAGEQUALITY_NORMAL in GFX100S.h
+        // public const int GFX100S_IMAGEQUALITY_RAW_FINE = 4;     // Corresponds to SDK_IMAGEQUALITY_RAW_FINE in GFX100S.h
+        // public const int GFX100S_IMAGEQUALITY_RAW_NORMAL = 5;   // Corresponds to SDK_IMAGEQUALITY_RAW_NORMAL in GFX100S.h
+        // public const int GFX100S_IMAGEQUALITY_SUPERFINE = 6;    // Corresponds to SDK_IMAGEQUALITY_SUPERFINE in GFX100S.h
+        // public const int GFX100S_IMAGEQUALITY_RAW_SUPERFINE = 7;// Corresponds to SDK_IMAGEQUALITY_RAW_SUPERFINE in GFX100S.h
+        // --- END REMOVED Hardcoded GFX100S Constants ---
 
 
         // Release Modes (From XAPI.h & XAPIOpt.h)
@@ -496,7 +505,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         private static IntPtr hCamera = IntPtr.Zero;
         private static object hardwareLock = new object();
         private static bool runOnce = false;
-        private static CameraConfig currentConfig = null; // Keep this null initially
+        internal static CameraConfig currentConfig = null; // Keep this null initially
         internal static Util utilities;
         internal static AstroUtils astroUtilities;
         internal static TraceLogger tl;
@@ -617,6 +626,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                         LogMessage("Connected Set", "Attempting to connect hardware...");
                         hCamera = IntPtr.Zero;
                         sensorName = "Unknown";
+                        currentConfig = null; // Reset config on connect attempt
                         IntPtr apiCodeBufferPtr = IntPtr.Zero; // <<<< Pointer for API code buffer
                         try
                         {
@@ -649,41 +659,9 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                             FujifilmSdkWrapper.CheckSdkError(hCamera, priorityResult, "XSDK_SetPriorityMode");
                             LogMessage("Connected Set", "PC Priority Mode set.");
 
-                            // --- Set Exposure Mode to Manual ---
-                            LogMessage("Connected Set", "Step 4.5: Setting Exposure Mode to Manual (M)...");
-                            int modeResult = FujifilmSdkWrapper.XSDK_SetMode(hCamera, FujifilmSdkWrapper.GFX100S_MODE_M);
-                            // *** Make this fatal if it fails ***
-                            FujifilmSdkWrapper.CheckSdkError(hCamera, modeResult, "XSDK_SetMode(Manual)"); // Ensure error check is active
-                            LogMessage("Connected Set", "Exposure Mode set to Manual (M).");
-
-                            // --- Verify Mode ---
-                            int currentMode;
-                            int getModeResult = FujifilmSdkWrapper.XSDK_GetMode(hCamera, out currentMode);
-                            if (getModeResult == FujifilmSdkWrapper.XSDK_COMPLETE)
-                            {
-                                LogMessage("Connected Set", $"Verified camera exposure mode is now: {currentMode} (Expected {FujifilmSdkWrapper.GFX100S_MODE_M})");
-                                if (currentMode != FujifilmSdkWrapper.GFX100S_MODE_M)
-                                {
-                                    // If SetMode succeeded but GetMode returns something else, something is weird.
-                                    LogMessage("Connected Set", $"CRITICAL WARNING: SetMode succeeded but GetMode returned unexpected mode {currentMode}!");
-                                    // Optional: throw an exception here if Mode M is absolutely essential
-                                    // throw new DriverException($"Failed to confirm Manual (M) mode after setting. Current mode: {currentMode}");
-                                }
-                            }
-                            else
-                            {
-                                LogMessage("Connected Set", $"Warning: XSDK_GetMode failed with result {getModeResult} after setting exposure mode.");
-                            }
-                            // --- End Verify Mode ---
-                            // --- End Set Exposure Mode ---
-
-                            // --- Removed attempt to Set Focus Mode via SetProp ---
-                            LogMessage("Connected Set", "Step 4.6: Skipping Focus Mode set (requires reliable SDK method or manual camera setting).");
-                            // --- End Removed Code ---
-
-
                             // --- Get Device Info ---
                             LogMessage("Connected Set", "Step 5: Getting device info...");
+                            string detectedModelName = "Unknown";
                             try
                             {
                                 FujifilmSdkWrapper.XSDK_DeviceInformation deviceInfo;
@@ -725,7 +703,8 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                                     LogMessage("Connected Set", $"Retrieved {numApiCodes} API Codes (Example: {apiCodes[0]})"); // Log first code as example
                                 }
 
-                                sensorName = deviceInfo.strProduct ?? "Unknown Model";
+                                detectedModelName = deviceInfo.strProduct ?? "Unknown Model";
+                                sensorName = detectedModelName; // Update sensorName here
                                 LogMessage("Connected Set", $"Retrieved Product Name: {sensorName}");
                                 LogMessage("Connected Set", $"Serial: {deviceInfo.strSerialNo}, Firmware: {deviceInfo.strFirmware}");
                             }
@@ -746,6 +725,48 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                             }
                             // --- End Get Device Info ---
 
+                            // --- Load Configuration based on detected model ---
+                            LogMessage("Connected Set", $"Step 5.5: Loading configuration for model '{detectedModelName}'...");
+                            LoadConfiguration(detectedModelName); // Load JSON based on model name
+                            if (currentConfig == null || currentConfig.SdkConstants == null)
+                            {
+                                throw new DriverException($"Failed to load or parse configuration for model '{detectedModelName}'. Cannot proceed.");
+                            }
+                            LogMessage("Connected Set", $"Configuration loaded for {currentConfig.ModelName}.");
+                            // --- End Load Configuration ---
+
+                            // --- Set Exposure Mode to Manual using loaded config ---
+                            LogMessage("Connected Set", "Step 5.6: Setting Exposure Mode to Manual (M) using loaded config...");
+                            int manualModeCode = currentConfig.SdkConstants.ModeManual;
+                            int modeResult = FujifilmSdkWrapper.XSDK_SetMode(hCamera, manualModeCode);
+                            FujifilmSdkWrapper.CheckSdkError(hCamera, modeResult, $"XSDK_SetMode(Manual - Code: {manualModeCode})");
+                            LogMessage("Connected Set", "Exposure Mode set to Manual (M).");
+
+                            // --- Verify Mode ---
+                            int currentMode;
+                            int getModeResult = FujifilmSdkWrapper.XSDK_GetMode(hCamera, out currentMode);
+                            if (getModeResult == FujifilmSdkWrapper.XSDK_COMPLETE)
+                            {
+                                LogMessage("Connected Set", $"Verified camera exposure mode is now: {currentMode} (Expected {manualModeCode})");
+                                if (currentMode != manualModeCode)
+                                {
+                                    LogMessage("Connected Set", $"CRITICAL WARNING: SetMode succeeded but GetMode returned unexpected mode {currentMode}!");
+                                    // Optional: throw an exception here if Mode M is absolutely essential
+                                    // throw new DriverException($"Failed to confirm Manual (M) mode after setting. Current mode: {currentMode}");
+                                }
+                            }
+                            else
+                            {
+                                LogMessage("Connected Set", $"Warning: XSDK_GetMode failed with result {getModeResult} after setting exposure mode.");
+                            }
+                            // --- End Verify Mode ---
+                            // --- End Set Exposure Mode ---
+
+                            // --- Removed attempt to Set Focus Mode via SetProp ---
+                            LogMessage("Connected Set", "Step 5.7: Skipping Focus Mode set (requires reliable SDK method or manual camera setting).");
+                            // --- End Removed Code ---
+
+
                             // --- Set connected state TRUE *before* caching capabilities ---
                             connectedState = true;
                             LogMessage("Connected Set", $"State before CacheCameraCapabilities: connectedState={connectedState}, hCamera={hCamera}");
@@ -765,6 +786,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                             if (apiCodeBufferPtr != IntPtr.Zero) { try { Marshal.FreeHGlobal(apiCodeBufferPtr); } catch { } }
                             connectedState = false; // Ensure state is false on error
                             sensorName = "Unknown";
+                            currentConfig = null; // Clear config on error
                             throw;
                         }
                     }
@@ -781,9 +803,16 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                                 LogMessage("Connected Set", "Camera session closed.");
                             }
                             catch (Exception ex) { LogMessage("Connected Set", $"Exception during XSDK_Close: {ex.Message}"); }
-                            finally { hCamera = IntPtr.Zero; connectedState = false; sensorName = "Unknown"; LogMessage("Connected Set", "Hardware Disconnected."); }
+                            finally
+                            {
+                                hCamera = IntPtr.Zero;
+                                connectedState = false;
+                                sensorName = "Unknown";
+                                currentConfig = null; // Clear config on disconnect
+                                LogMessage("Connected Set", "Hardware Disconnected.");
+                            }
                         }
-                        else { LogMessage("Connected Set", "Already disconnected (no handle)."); connectedState = false; sensorName = "Unknown"; }
+                        else { LogMessage("Connected Set", "Already disconnected (no handle)."); connectedState = false; sensorName = "Unknown"; currentConfig = null; }
                     }
                 }
             }
@@ -1209,6 +1238,75 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         internal static void LogMessage(string identifier, string format, params object[] args) { tl?.LogMessageCrLf(identifier, string.Format(format, args)); }
         private static bool IsConnected => connectedState && hCamera != IntPtr.Zero;
 
+        // *** NEW: Load configuration from JSON file ***
+        private static void LoadConfiguration(string modelName)
+        {
+            // Basic sanitization of model name to use as filename
+            string safeModelName = new string(modelName.Where(ch => char.IsLetterOrDigit(ch) || ch == '-').ToArray());
+            if (string.IsNullOrWhiteSpace(safeModelName))
+            {
+                LogMessage("LoadConfiguration", $"Error: Invalid model name '{modelName}' for creating filename.");
+                currentConfig = null;
+                return;
+            }
+
+            string configFileName = $"{safeModelName}.json";
+            // Determine the path to the configuration file.
+            // This might be relative to the driver DLL, or a specific config directory.
+            // Example: Assuming JSON files are in the same directory as the driver DLL.
+            string driverPath = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+            string configFilePath = Path.Combine(driverPath, configFileName);
+
+            LogMessage("LoadConfiguration", $"Attempting to load configuration from: {configFilePath}");
+
+            if (!File.Exists(configFilePath))
+            {
+                LogMessage("LoadConfiguration", $"Error: Configuration file not found: {configFilePath}");
+                currentConfig = null;
+                return;
+            }
+
+            try
+            {
+                string jsonString = File.ReadAllText(configFilePath);
+                // Using System.Text.Json for deserialization (requires .NET Core 3.1+ or .NET 5+)
+                // If using older .NET Framework, you might need Newtonsoft.Json (Json.NET)
+                var options = new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true // Handle potential case differences in JSON keys
+                };
+                currentConfig = JsonSerializer.Deserialize<CameraConfig>(jsonString, options);
+
+                if (currentConfig == null)
+                {
+                    LogMessage("LoadConfiguration", $"Error: Failed to deserialize JSON from {configFilePath}.");
+                    return;
+                }
+
+                // Populate defaults from config if they exist
+                cameraXSize = currentConfig.CameraXSize;
+                cameraYSize = currentConfig.CameraYSize;
+                pixelSizeX = currentConfig.PixelSizeX;
+                pixelSizeY = currentConfig.PixelSizeY;
+                maxAdu = currentConfig.MaxAdu;
+                // Note: Sensitivity and Exposure Min/Max will be overwritten by SDK query later
+                // but we keep the defaults from JSON as a fallback
+
+                LogMessage("LoadConfiguration", $"Successfully loaded and parsed config for {currentConfig.ModelName}.");
+            }
+            catch (JsonException jsonEx)
+            {
+                LogMessage("LoadConfiguration", $"JSON Parsing Error in {configFilePath}: {jsonEx.Message}");
+                currentConfig = null;
+            }
+            catch (Exception ex)
+            {
+                LogMessage("LoadConfiguration", $"Error loading configuration file {configFilePath}: {ex.Message}");
+                currentConfig = null;
+            }
+        }
+
+
         // *** MODIFIED: CacheCameraCapabilities now calls SDK functions ***
         private static void CacheCameraCapabilities()
         {
@@ -1219,11 +1317,22 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 LogMessage("CacheCameraCapabilities", "Exiting CacheCameraCapabilities early because IsConnected is false.");
                 return; // Exit if not connected
             }
+            // Ensure config is loaded before proceeding (should have been loaded during connect)
+            if (currentConfig == null)
+            {
+                LogMessage("CacheCameraCapabilities", "CRITICAL: currentConfig is null. Cannot cache capabilities.");
+                // Optionally throw an exception or set default fallbacks here
+                // For now, using hardcoded fallbacks as before, but logging critical error
+                minSensitivity = 100; maxSensitivity = 12800; supportedSensitivities.Clear();
+                minExposure = 0.0001; maxExposure = 60.0; bulbCapable = true; supportedShutterSpeeds.Clear();
+                return;
+            }
+
 
             LogMessage("CacheCameraCapabilities", "Caching camera capabilities (Querying SDK)...");
 
             // --- Populate Shutter Map FIRST ---
-            PopulateShutterSpeedMaps();
+            PopulateShutterSpeedMaps(); // Uses hardcoded map from SDK PDF for now
             LogMessage("CacheCameraCapabilities", $"After PopulateShutterSpeedMaps, durationToSdkShutterSpeed.Count = {durationToSdkShutterSpeed.Count}");
 
             // --- Get Sensitivity (Gain) Capabilities ---
@@ -1274,11 +1383,11 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     supportedSensitivities = sdkSensitivities.Where(s => s >= 0).ToList(); // Filter out negative AUTO values
                     supportedSensitivities.Sort();
                     if (supportedSensitivities.Count > 0) { minSensitivity = supportedSensitivities.Min(); maxSensitivity = supportedSensitivities.Max(); LogMessage("CacheCameraCapabilities", $"Sensitivity Range: Min={minSensitivity}, Max={maxSensitivity}. Count={supportedSensitivities.Count}"); }
-                    else { LogMessage("CacheCameraCapabilities", "Warning: SDK returned sensitivities, but all were filtered out. Using defaults."); /* Fallback */ minSensitivity = 100; maxSensitivity = 12800; supportedSensitivities.Clear(); }
+                    else { LogMessage("CacheCameraCapabilities", "Warning: SDK returned sensitivities, but all were filtered out. Using defaults."); /* Fallback */ minSensitivity = currentConfig.DefaultMinSensitivity; maxSensitivity = currentConfig.DefaultMaxSensitivity; supportedSensitivities.Clear(); }
                 }
-                else { LogMessage("CacheCameraCapabilities", "Warning: Failed to get sensitivity list from SDK or list was empty. Using defaults."); /* Fallback */ minSensitivity = 100; maxSensitivity = 12800; supportedSensitivities.Clear(); }
+                else { LogMessage("CacheCameraCapabilities", "Warning: Failed to get sensitivity list from SDK or list was empty. Using defaults."); /* Fallback */ minSensitivity = currentConfig.DefaultMinSensitivity; maxSensitivity = currentConfig.DefaultMaxSensitivity; supportedSensitivities.Clear(); }
             }
-            catch (Exception ex) { LogMessage("CacheCameraCapabilities", $"Error getting sensitivity capabilities: {ex.Message}. Using defaults."); /* Fallback */ minSensitivity = 100; maxSensitivity = 12800; supportedSensitivities.Clear(); }
+            catch (Exception ex) { LogMessage("CacheCameraCapabilities", $"Error getting sensitivity capabilities: {ex.Message}. Using defaults."); /* Fallback */ minSensitivity = currentConfig.DefaultMinSensitivity; maxSensitivity = currentConfig.DefaultMaxSensitivity; supportedSensitivities.Clear(); }
 
             // --- Get Shutter Speed Capabilities ---
             try
@@ -1311,25 +1420,25 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     else
                     {
                         LogMessage("CacheCameraCapabilities", "Warning: No supported shutter codes found in the pre-defined map. Using defaults.");
-                        minExposure = currentConfig?.DefaultMinExposure ?? 0.0001;
-                        maxExposure = currentConfig?.DefaultMaxExposure ?? 60.0;
+                        minExposure = currentConfig.DefaultMinExposure;
+                        maxExposure = currentConfig.DefaultMaxExposure;
                     }
                 }
                 else
                 {
                     LogMessage("CacheCameraCapabilities", "Warning: Failed to get shutter speed list from SDK or list was empty. Using defaults.");
-                    minExposure = currentConfig?.DefaultMinExposure ?? 0.0001;
-                    maxExposure = currentConfig?.DefaultMaxExposure ?? 60.0;
-                    bulbCapable = currentConfig?.DefaultBulbCapable ?? true; // Use JSON default if SDK fails
+                    minExposure = currentConfig.DefaultMinExposure;
+                    maxExposure = currentConfig.DefaultMaxExposure;
+                    bulbCapable = currentConfig.DefaultBulbCapable; // Use JSON default if SDK fails
                     supportedShutterSpeeds.Clear();
                 }
             }
             catch (Exception ex)
             {
                 LogMessage("CacheCameraCapabilities", $"Error getting shutter speed capabilities: {ex.Message}. Using defaults.");
-                minExposure = currentConfig?.DefaultMinExposure ?? 0.0001;
-                maxExposure = currentConfig?.DefaultMaxExposure ?? 60.0;
-                bulbCapable = currentConfig?.DefaultBulbCapable ?? true; // Use JSON default if SDK fails
+                minExposure = currentConfig.DefaultMinExposure;
+                maxExposure = currentConfig.DefaultMaxExposure;
+                bulbCapable = currentConfig.DefaultBulbCapable; // Use JSON default if SDK fails
                 supportedShutterSpeeds.Clear();
             }
 
@@ -1351,6 +1460,10 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             durationToSdkShutterSpeed.Clear();
             LogMessage("PopulateShutterSpeedMaps", "Populating shutter speed maps based on SDK PDF...");
             // --- MAPPINGS BASED ON SDK PDF pp. 91-95 ---
+            // This part remains hardcoded based on the SDK documentation, as these mappings
+            // are generally consistent across models that support these speeds.
+            // If future models change these fundamental mappings, this would also need
+            // to potentially move to the JSON config, but that seems less likely.
             AddSdkShutterMapping(5, 1.0 / 180000.0); AddSdkShutterMapping(6, 1.0 / 160000.0); AddSdkShutterMapping(7, 1.0 / 128000.0);
             AddSdkShutterMapping(9, 1.0 / 102400.0); AddSdkShutterMapping(12, 1.0 / 80000.0); AddSdkShutterMapping(15, 1.0 / 64000.0);
             AddSdkShutterMapping(19, 1.0 / 51200.0); AddSdkShutterMapping(24, 1.0 / 40000.0); AddSdkShutterMapping(30, 1.0 / 32000.0);
@@ -1587,6 +1700,14 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             lastImageArray = null;
             byte[] downloadBuffer = null;
 
+            // Ensure config is loaded before proceeding
+            if (currentConfig == null || currentConfig.SdkConstants == null)
+            {
+                LogMessage("DownloadImageData", "Error: Camera configuration not loaded. Cannot determine RAW formats.");
+                cameraState = CameraStates.cameraError;
+                throw new DriverException("Camera configuration not loaded. Cannot download image.");
+            }
+
             try
             {
                 CheckConnected("DownloadImageData"); // Checks hCamera
@@ -1599,16 +1720,20 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 if (imgInfo.lDataSize <= 0) throw new DriverException($"XSDK_ReadImageInfo reported zero data size ({imgInfo.lDataSize}).");
                 LogMessage("DownloadImageData", $"Expecting image: {imgInfo.lImagePixWidth}x{imgInfo.lImagePixHeight}, Size: {imgInfo.lDataSize}, Format: {imgInfo.lFormat:X}");
 
-                // --- Check Format ---
-                bool isRawFormat = (imgInfo.lFormat == FujifilmSdkWrapper.GFX100S_IMAGEQUALITY_RAW ||
-                                    imgInfo.lFormat == FujifilmSdkWrapper.GFX100S_IMAGEQUALITY_RAW_FINE ||
-                                    imgInfo.lFormat == FujifilmSdkWrapper.GFX100S_IMAGEQUALITY_RAW_NORMAL ||
-                                    imgInfo.lFormat == FujifilmSdkWrapper.GFX100S_IMAGEQUALITY_RAW_SUPERFINE);
+                // --- Check Format using loaded config ---
+                // Check against the known RAW format codes from the loaded configuration
+                bool isRawFormat = (imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRaw ||
+                                    imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRawFine ||
+                                    imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRawNormal ||
+                                    imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRawSuperfine);
+                // Add more checks here if other formats can also represent RAW for different models
 
                 if (!isRawFormat)
                 {
-                    throw new DriverException($"Unsupported image format {imgInfo.lFormat:X} for Bayer data retrieval. Ensure camera saves RAW.");
+                    LogMessage("DownloadImageData", $"Unsupported image format {imgInfo.lFormat:X} for Bayer data retrieval based on current config. Expected RAW codes: {currentConfig.SdkConstants.ImageQualityRaw}, {currentConfig.SdkConstants.ImageQualityRawFine}, etc.");
+                    throw new DriverException($"Unsupported image format {imgInfo.lFormat:X} for Bayer data retrieval. Ensure camera saves RAW according to loaded configuration.");
                 }
+                // --- End Format Check ---
 
                 // --- Download using Fuji SDK ---
                 downloadBuffer = new byte[imgInfo.lDataSize];
