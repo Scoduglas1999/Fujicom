@@ -1,5 +1,5 @@
 ﻿// ASCOM Camera hardware class for ScdouglasFujifilm
-// Author: Sean Douglas scdouglas1999@gmail.com
+// Author: S. Douglas <your@email.here>
 // Description: Interfaces with the Fujifilm X SDK to control Fujifilm cameras.
 // Implements: ASCOM Camera interface version: 3
 
@@ -181,6 +181,9 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         // Bulb Release Modes (From XAPI.h)
         public const int XSDK_RELEASE_BULBS2_ON = 0x0500;  // Correct value from XAPI.h
         public const int XSDK_RELEASE_N_BULBS2OFF = 0x0008; // Correct value from XAPI.h
+        // *** CORRECTED: Use the combined constant from XAPI.h for stopping bulb ***
+        public const int XSDK_RELEASE_N_BULBS1OFF = (XSDK_RELEASE_N_BULBS2OFF | XSDK_RELEASE_N_S1OFF); // 0x000C
+
 
         // Shutter Speed
         public const int XSDK_SHUTTER_BULB = -1;
@@ -671,7 +674,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
                             // --- Get Device Info ---
                             LogMessage("Connected Set", "Step 5: Getting device info...");
-                            string detectedModelName = "Unknown";
+                            string detectedModelName = "Unknown Model";
                             try
                             {
                                 FujifilmSdkWrapper.XSDK_DeviceInformation deviceInfo;
@@ -955,8 +958,16 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             get
             {
                 CheckConnected("Gain Get");
-                lock (hardwareLock)
+                // *** ADDED Lock to prevent interference ***
+                lock (exposureLock)
                 {
+                    // Check if an exposure is running; if so, maybe return cached value or throw?
+                    // For now, proceed but be aware this might still interfere if SDK is sensitive
+                    if (cameraState == CameraStates.cameraExposing || cameraState == CameraStates.cameraDownload)
+                    {
+                        LogMessage("Gain Get", $"Warning: Getting Gain while camera state is {cameraState}. SDK call might interfere or fail.");
+                    }
+
                     int sdkSensitivity;
                     LogMessage("Gain Get", $"Calling XSDK_GetSensitivity(hCamera={hCamera})...");
                     int result = FujifilmSdkWrapper.XSDK_GetSensitivity(hCamera, out sdkSensitivity);
@@ -979,8 +990,16 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     LogMessage("Gain Set", $"Warning: Requested ISO {value} is not in the list of explicitly supported values from CapSensitivity. Attempting to set anyway.");
                 }
 
-                lock (hardwareLock)
+                // *** ADDED Lock to prevent interference ***
+                lock (exposureLock)
                 {
+                    // Check if an exposure is running; if so, maybe prevent setting?
+                    if (cameraState == CameraStates.cameraExposing || cameraState == CameraStates.cameraDownload)
+                    {
+                        LogMessage("Gain Set", $"Error: Cannot set Gain while camera state is {cameraState}.");
+                        throw new ASCOM.InvalidOperationException($"Cannot set Gain while camera is {cameraState}.");
+                    }
+
                     LogMessage("Gain Set", $"Calling XSDK_SetSensitivity(hCamera={hCamera}, value={value})...");
                     int result = FujifilmSdkWrapper.XSDK_SetSensitivity(hCamera, value);
                     LogMessage("Gain Set", $"XSDK_SetSensitivity returned {result}");
@@ -1158,6 +1177,8 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     int setResult = FujifilmSdkWrapper.XSDK_SetShutterSpeed(hCamera, sdkShutterSpeed, isBulb);
                     FujifilmSdkWrapper.CheckSdkError(hCamera, setResult, "XSDK_SetShutterSpeed");
 
+                    // *** REMOVED Bulb state verification step ***
+
                     // *** Add small delay after setting shutter speed, especially before Bulb start ***
                     if (isBulb == 1)
                     {
@@ -1165,11 +1186,12 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                         System.Threading.Thread.Sleep(100); // 100ms delay
                     }
 
-                    // --- Allocate shotOptPtr for all cases ---
+
+                    // --- Allocate shotOptPtr ---
                     shotOptPtr = Marshal.AllocHGlobal(sizeof(long));
                     Marshal.WriteInt64(shotOptPtr, shotOptValue); // Write 0L to the allocated memory
                     shotOptAllocated = true; // Mark as allocated
-                    LogMessage("StartExposure", $"Allocated and initialized plShotOpt (long*) at {shotOptPtr} with value {shotOptValue}");
+                    LogMessage("StartExposure", $"Allocated plShotOpt (long*) at {shotOptPtr} with value {shotOptValue}");
 
                     // --- Trigger Exposure Start ---
                     int releaseModeStart;
@@ -1217,6 +1239,9 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                             throw; // Re-throw the original BULBS2_ON error
                         }
                         LogMessage("StartExposure", $"SDK Release command (BULBS2_ON - Start) sent successfully.");
+
+                        // *** REMOVED EXPERIMENTAL delay after BULBS2_ON ***
+
                     }
                     else
                     {
@@ -1247,12 +1272,14 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     {
                         LogMessage("StartExposure", $"Starting BULB timer for {exposureMillis} ms (Callback: OnBulbExposureTimerElapsed).");
                         // Start timer for the exact duration for bulb, stop command will be sent in callback
+                        // *** Pass IntPtr.Zero as state (pointer freed below) ***
                         exposureTimer = new System.Threading.Timer(OnBulbExposureTimerElapsed, null, exposureMillis, Timeout.Infinite);
                     }
                     else
                     {
                         LogMessage("StartExposure", $"Starting TIMED timer for {exposureMillis + bufferMillis} ms (Callback: OnExposureComplete).");
                         // Start timer with buffer for timed exposures, image check happens in callback
+                        // *** Pass IntPtr.Zero as state (pointer freed below) ***
                         exposureTimer = new System.Threading.Timer(OnExposureComplete, null, exposureMillis + bufferMillis, Timeout.Infinite);
                     }
                     LogMessage("StartExposure", $"Exposure timing initiated.");
@@ -1262,17 +1289,24 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 {
                     LogMessage("StartExposure", $"StartExposure failed: {ex.Message}\n{ex.StackTrace}"); // Added stack trace
                     cameraState = CameraStates.cameraError;
+                    // *** Ensure pointer is freed if exception occurs before timer starts ***
+                    if (shotOptAllocated && shotOptPtr != IntPtr.Zero)
+                    {
+                        Marshal.FreeHGlobal(shotOptPtr);
+                        LogMessage("StartExposure", $"Freed plShotOpt memory due to exception before timer start.");
+                        shotOptAllocated = false; // Prevent double-free in finally
+                    }
                     throw;
                 }
                 finally
                 {
-                    // --- Free allocated shot options memory ---
-                    if (shotOptAllocated && shotOptPtr != IntPtr.Zero) // Check flag
+                    // *** Free allocated shot options memory ***
+                    if (shotOptAllocated && shotOptPtr != IntPtr.Zero)
                     {
                         Marshal.FreeHGlobal(shotOptPtr);
                         LogMessage("StartExposure", $"Freed allocated plShotOpt memory at {shotOptPtr}");
                     }
-                    // --- End Free ---
+                    // *** END Free ***
                 }
             }
         }
@@ -1658,9 +1692,10 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             }
         }
 
-        // *** MODIFIED: Timer callback specifically for BULB exposures ***
+        // *** UPDATED: Timer callback specifically for BULB exposures ***
         private static void OnBulbExposureTimerElapsed(object state)
         {
+            // *** Ensure the entire method is locked ***
             lock (exposureLock)
             {
                 if (cameraState != CameraStates.cameraExposing)
@@ -1668,12 +1703,12 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     LogMessage("OnBulbExposureTimerElapsed", $"Timer fired but state is {cameraState}. Ignoring.");
                     return;
                 }
-                LogMessage("OnBulbExposureTimerElapsed", $"BULB timer fired for {lastExposureDuration}s. Attempting to STOP exposure.");
+                LogMessage("OnBulbExposureTimerElapsed", $"BULB timer fired for {lastExposureDuration}s. Attempting to STOP exposure using combined command XSDK_RELEASE_N_BULBS1OFF (0x{FujifilmSdkWrapper.XSDK_RELEASE_N_BULBS1OFF:X}).");
 
+                // Allocate memory for the long* parameters (pShotOpt and pStatus)
                 IntPtr shotOptPtr = IntPtr.Zero;
-                long shotOptValue = 0;
-                int s1OffResult = -1;
-                int bulbOffResult = -1;
+                IntPtr statusPtr = IntPtr.Zero;
+                bool stopSuccess = false; // Flag to track if stop sequence likely worked
 
                 try
                 {
@@ -1684,53 +1719,49 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                         return;
                     }
 
-                    // *** MODIFIED: Send S1 OFF *before* BULBS2 OFF ***
+                    // Add delay *before* sending stop command
+                    LogMessage("OnBulbExposureTimerElapsed", "Adding delay before sending stop command...");
+                    System.Threading.Thread.Sleep(500); // Try 500ms delay
 
-                    // 1. Send S1 OFF command
-                    LogMessage("OnBulbExposureTimerElapsed", "Sending S1 OFF command first...");
-                    // Using IntPtr.Zero for shot options, as per example for S1 OFF
-                    s1OffResult = FujifilmSdkWrapper.XSDK_Release(hCamera, FujifilmSdkWrapper.XSDK_RELEASE_N_S1OFF, IntPtr.Zero, out _);
-                    if (s1OffResult != FujifilmSdkWrapper.XSDK_COMPLETE)
-                    {
-                        LogMessage("OnBulbExposureTimerElapsed", $"WARNING: XSDK_Release (S1 OFF) failed with result {s1OffResult}.");
-                        // Optionally log detailed error
-                    }
-                    else
-                    {
-                        LogMessage("OnBulbExposureTimerElapsed", "S1 OFF command sent successfully.");
-                    }
-                    // Add a small delay between commands if needed
-                    // System.Threading.Thread.Sleep(50);
-
-                    // 2. Send BULBS2 OFF command
+                    // Allocate memory for the long parameters
                     shotOptPtr = Marshal.AllocHGlobal(sizeof(long));
-                    Marshal.WriteInt64(shotOptPtr, shotOptValue);
-                    LogMessage("OnBulbExposureTimerElapsed", $"Allocated plShotOpt for BULBS2_OFF at {shotOptPtr}");
+                    statusPtr = Marshal.AllocHGlobal(sizeof(long));
+                    Marshal.WriteInt64(shotOptPtr, 0L); // Initialize pShotOpt value to 0
+                    Marshal.WriteInt64(statusPtr, 0L);  // Initialize pStatus value to 0
 
-                    int releaseModeStop = FujifilmSdkWrapper.XSDK_RELEASE_N_BULBS2OFF; // 0x0008
-                    LogMessage("OnBulbExposureTimerElapsed", $"Triggering exposure STOP via XSDK_Release (Mode: 0x{releaseModeStop:X}, Options Ptr: {shotOptPtr})...");
-                    int releaseStatus;
-                    bulbOffResult = FujifilmSdkWrapper.XSDK_Release(hCamera, releaseModeStop, shotOptPtr, out releaseStatus);
-                    LogMessage("OnBulbExposureTimerElapsed", $"XSDK_Release (BULBS2_OFF) returned {bulbOffResult}, status={releaseStatus}");
+                    // Send the combined BULB STOP command
+                    int releaseModeStopBulb = FujifilmSdkWrapper.XSDK_RELEASE_N_BULBS1OFF; // Use 0x000C
+                    LogMessage("OnBulbExposureTimerElapsed", $"Triggering BULB STOP via XSDK_Release (Mode: 0x{releaseModeStopBulb:X}, Options Ptr: {shotOptPtr})...");
+                    int releaseStatusBulb; // Variable to receive the status output
+                    int bulbOffResult = FujifilmSdkWrapper.XSDK_Release(hCamera, releaseModeStopBulb, shotOptPtr, out releaseStatusBulb); // Pass the pointer for pShotOpt
+                    LogMessage("OnBulbExposureTimerElapsed", $"XSDK_Release (BULB STOP) returned {bulbOffResult}, status={releaseStatusBulb}");
 
                     if (bulbOffResult != FujifilmSdkWrapper.XSDK_COMPLETE)
                     {
-                        LogMessage("OnBulbExposureTimerElapsed", $"WARNING: XSDK_Release (BULBS2_OFF) failed with result {bulbOffResult}. Image might not be available.");
-                        // Optionally log detailed error
+                        LogMessage("OnBulbExposureTimerElapsed", $"WARNING: XSDK_Release (BULB STOP) failed with result {bulbOffResult}. Getting specific error...");
+                        LogSpecificError($"BULB STOP (0x{releaseModeStopBulb:X})"); // Log specific error
                     }
                     else
                     {
-                        LogMessage("OnBulbExposureTimerElapsed", $"SDK Release command (BULBS2_OFF) sent successfully.");
+                        LogMessage("OnBulbExposureTimerElapsed", $"SDK Release command (BULB STOP) sent successfully.");
+                        stopSuccess = true; // Mark stop as successful
                     }
-                    // *** END MODIFIED ORDER ***
 
-
-                    // Add a small delay to allow camera to process the stop command and write buffer
-                    LogMessage("OnBulbExposureTimerElapsed", "Adding short delay after stop commands...");
-                    System.Threading.Thread.Sleep(500); // 500ms delay, adjust if needed
+                    // Add a slightly longer delay to allow camera to process the stop command and write buffer
+                    LogMessage("OnBulbExposureTimerElapsed", "Adding longer delay after stop command...");
+                    System.Threading.Thread.Sleep(1000); // Increase delay to 1000ms (adjust if needed)
 
                     // Now check for the image data using the helper method
-                    CheckForImageData();
+                    if (stopSuccess)
+                    {
+                        CheckForImageData();
+                    }
+                    else
+                    {
+                        LogMessage("OnBulbExposureTimerElapsed", "Skipping image check because Bulb stop command failed.");
+                        cameraState = CameraStates.cameraError; // Ensure error state if stop failed
+                        imageReady = false;
+                    }
 
                 }
                 catch (Exception ex)
@@ -1741,36 +1772,73 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 }
                 finally
                 {
-                    // Free allocated shot options memory
-                    if (shotOptPtr != IntPtr.Zero)
-                    {
-                        Marshal.FreeHGlobal(shotOptPtr);
-                        LogMessage("OnBulbExposureTimerElapsed", $"Freed plShotOpt memory at {shotOptPtr}");
-                    }
+                    // Free the allocated memory for the pointers
+                    if (shotOptPtr != IntPtr.Zero) Marshal.FreeHGlobal(shotOptPtr);
+                    if (statusPtr != IntPtr.Zero) Marshal.FreeHGlobal(statusPtr);
+
                     // Ensure state moves away from exposing if not already error/idle
-                    // CheckForImageData will set to Idle if successful, or Error if exception occurred there.
                     if (cameraState == CameraStates.cameraExposing)
                     {
-                        LogMessage("OnBulbExposureTimerElapsed", "State still 'Exposing' after checks, setting to 'Idle'.");
+                        LogMessage("OnBulbExposureTimerElapsed", "State still 'Exposing' after checks/errors, setting to 'Idle'.");
                         cameraState = CameraStates.cameraIdle; // Move to idle if checks didn't change state
+                        imageReady = false; // Ensure imageReady is false if we force idle here
                     }
                 }
+            } // End Lock
+        }
+
+
+        // Helper to log specific errors after a failed Release call
+        private static void LogSpecificError(string commandName)
+        {
+            try
+            {
+                int apiCode = 0, errCode = 0;
+                FujifilmSdkWrapper.XSDK_GetErrorNumber(hCamera, out apiCode, out errCode);
+                LogMessage("OnBulbExposureTimerElapsed", $"Specific Error after {commandName}: API Code={apiCode:X}, Error Code={errCode}");
+            }
+            catch (Exception getErrEx)
+            {
+                LogMessage("OnBulbExposureTimerElapsed", $"Exception getting error details after {commandName}: {getErrEx.Message}");
             }
         }
+
 
         // *** MODIFIED: Original callback now only for TIMED exposures ***
         private static void OnExposureComplete(object state)
         {
+            // *** Retrieve and free the shotOptPtr passed via timer state ***
+            IntPtr shotOptPtr = IntPtr.Zero;
+            if (state is IntPtr ptrState)
+            {
+                shotOptPtr = ptrState;
+                LogMessage("OnExposureComplete", $"Retrieved shotOptPtr {shotOptPtr} from timer state.");
+            }
+            else
+            {
+                // This case should ideally not happen if StartExposure always passes a pointer
+                LogMessage("OnExposureComplete", $"Warning: Timer state was not an IntPtr! Cannot free original shotOptPtr.");
+            }
+
             lock (exposureLock)
             {
                 if (cameraState != CameraStates.cameraExposing)
                 {
                     // This might happen if AbortExposure was called, or if it's a bulb exposure handled elsewhere
                     LogMessage("OnExposureComplete", $"Timer fired but state is {cameraState}. Ignoring.");
+                    // Free pointer even if ignoring
+                    if (shotOptPtr != IntPtr.Zero) Marshal.FreeHGlobal(shotOptPtr);
                     return;
                 }
                 LogMessage("OnExposureComplete", $"TIMED exposure timer fired for {lastExposureDuration}s. Checking for image availability.");
                 CheckForImageData(); // Call the common image check logic
+            }
+
+            // *** Free pointer after lock released ***
+            if (shotOptPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(shotOptPtr);
+                LogMessage("OnExposureComplete", $"Freed original shotOptPtr {shotOptPtr}.");
             }
         }
 

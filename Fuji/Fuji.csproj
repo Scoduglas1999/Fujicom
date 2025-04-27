@@ -64,6 +64,7 @@
   <PropertyGroup>
     <AssemblyOriginatorKeyFile>LocalServer.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
+
   <ItemGroup>
     <Reference Include="ASCOM.Astrometry, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" />
     <Reference Include="ASCOM.Attributes, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" />
@@ -79,6 +80,7 @@
     <Reference Include="System.Numerics" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
+
   <ItemGroup>
     <Compile Include="ClassFactory.cs" />
     <Compile Include="CameraDriver\CameraDriver.cs" />
@@ -111,25 +113,193 @@
       <SubType>Designer</SubType>
     </EmbeddedResource>
   </ItemGroup>
+
   <ItemGroup>
     <Content Include="ASCOM.ico" />
     <Content Include="ASCOM.png" />
-    <Content Include="libraw.dll" />
     <Content Include="ReadMe.htm" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="app.config" />
+
+    <Content Include="libraw.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+
     <Content Include="CameraConfigs\GFX100S.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
     <Content Include="CameraConfigs\X-T3.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
     <Content Include="CameraConfigs\X-T5.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
+
+    <Content Include="RequiredDLL\FF0016AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FF0016AR.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FF0017AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FF0018AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FF0019AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FF0020AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FF0020AR.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FTLPTP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FTLPTPR.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\XAPF.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0005AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0005AR.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0007AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0008AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0009AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0010AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0011AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0012AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0013AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0014AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0015AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0000AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0001AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0002AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0003AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\FP0004AP.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\sidlx64w.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredDLL\libraw.lib">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+
+    <Content Include="RequiredHeaders\GFX50S.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\GFX50SII.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\GFX50R.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\GFX100.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\GFX100S.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\GFX100II_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\GFX100II.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\GFX100SII.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\GFX100SII_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\XAPF.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\XAPF_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\XAPFopt.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\XAPFopt_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-H2.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-H2_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-H2S_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-H5_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-MS_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-Pro3.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-S10.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-S20_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-T3.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-T4.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-T5.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="RequiredHeaders\X-T5_MOV.h">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="app.config" />
     <None Include="LocalServer.snk" />
   </ItemGroup>
+
   <ItemGroup>
     <BootstrapperPackage Include="Microsoft.Net.Client.3.5">
       <Visible>False</Visible>
@@ -147,6 +317,7 @@
       <Install>true</Install>
     </BootstrapperPackage>
   </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json">
       <Version>13.0.3</Version>
@@ -170,25 +341,36 @@
       <Version>9.0.4</Version>
     </PackageReference>
   </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\LibRawWrapper\LibRawWrapper.vcxproj">
       <Project>{58d228ec-9d14-8bc4-e744-26575477b5a0}</Project>
       <Name>LibRawWrapper</Name>
     </ProjectReference>
   </ItemGroup>
+
   <ItemGroup />
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
-  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
-       Other similar extension points exist, see Microsoft.Common.targets.
-  <Target Name="BeforeBuild">
+
+  <Target Name="CopyRequiredFiles" AfterTargets="Build">
+    <ItemGroup>
+      <_SourceDlls Include="$(MSBuildProjectDirectory)\RequiredDLL\*.*" />
+      <_SourceHeaders Include="$(MSBuildProjectDirectory)\RequiredHeaders\*.*" />
+      <_SourceConfigs Include="$(MSBuildProjectDirectory)\CameraConfigs\*.*" />
+      <_SourceRootFiles Include="$(MSBuildProjectDirectory)\libraw.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SourceDlls)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_SourceHeaders)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_SourceConfigs)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_SourceRootFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Message Text="Custom Target: Copying files from RequiredDLL..." Importance="normal" />
+    <Message Text="Custom Target: Copying files from RequiredHeaders..." Importance="normal" />
+    <Message Text="Custom Target: Copying files from CameraConfigs..." Importance="normal" />
+    <Message Text="Custom Target: Copying root files..." Importance="normal" />
   </Target>
-  <Target Name="AfterBuild">
-  </Target>
-  -->
+
   <PropertyGroup>
-    <PreBuildEvent>
-    </PreBuildEvent>
-    <PostBuildEvent>
-    </PostBuildEvent>
+    <PreBuildEvent></PreBuildEvent>
+    <PostBuildEvent></PostBuildEvent>
   </PropertyGroup>
 </Project>
