@@ -15,6 +15,7 @@ using System.IO;
 using System.Linq; // Added for Min()/Max() extension methods
 using System.Runtime.InteropServices; // Needed for GCHandle, Marshal
 using System.Threading;
+using System.Threading.Tasks; // Added for Task.Run
 using System.Windows.Forms;
 using System.Text.Json; // Required for JSON deserialization
 
@@ -538,7 +539,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         private static bool imageReady = false;
         private static System.Threading.Timer exposureTimer;
         // *** CORRECTED: Renamed padlock back to exposureLock ***
-        private static readonly object exposureLock = new object();
+        private static readonly object exposureLock = new object(); // Lock for exposure state and image data
         private static List<int> supportedSensitivities = new List<int>(); // *** Will be populated by SDK ***
         private static int minSensitivity = 100; // *** Default, updated by SDK ***
         private static int maxSensitivity = 12800; // *** Default, updated by SDK ***
@@ -1707,7 +1708,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
                 // Allocate memory for the long* parameters (pShotOpt and pStatus)
                 IntPtr shotOptPtr = IntPtr.Zero;
-                IntPtr statusPtr = IntPtr.Zero;
+                IntPtr statusPtr = IntPtr.Zero; // Allocate for status too
                 bool stopSuccess = false; // Flag to track if stop sequence likely worked
 
                 try
@@ -1725,7 +1726,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
                     // Allocate memory for the long parameters
                     shotOptPtr = Marshal.AllocHGlobal(sizeof(long));
-                    statusPtr = Marshal.AllocHGlobal(sizeof(long));
+                    statusPtr = Marshal.AllocHGlobal(sizeof(long)); // Allocate for status
                     Marshal.WriteInt64(shotOptPtr, 0L); // Initialize pShotOpt value to 0
                     Marshal.WriteInt64(statusPtr, 0L);  // Initialize pStatus value to 0
 
@@ -1747,18 +1748,22 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                         stopSuccess = true; // Mark stop as successful
                     }
 
-                    // Add a slightly longer delay to allow camera to process the stop command and write buffer
-                    LogMessage("OnBulbExposureTimerElapsed", "Adding longer delay after stop command...");
-                    System.Threading.Thread.Sleep(1000); // Increase delay to 1000ms (adjust if needed)
+                    // *** REMOVED FIXED DELAY - Replaced with polling task ***
+                    //LogMessage("OnBulbExposureTimerElapsed", "Adding longer delay after stop command...");
+                    //System.Threading.Thread.Sleep(2500); // Increase delay to 2.5 seconds
 
                     // Now check for the image data using the helper method
                     if (stopSuccess)
                     {
-                        CheckForImageData();
+                        // *** START POLLING TASK ***
+                        LogMessage("OnBulbExposureTimerElapsed", "Starting background task to poll for image data...");
+                        Task.Run(() => PollForBulbImage());
+                        // The camera state will be set to Idle or Error by the polling task
+                        // We don't call CheckForImageData directly here anymore.
                     }
                     else
                     {
-                        LogMessage("OnBulbExposureTimerElapsed", "Skipping image check because Bulb stop command failed.");
+                        LogMessage("OnBulbExposureTimerElapsed", "Skipping image polling because Bulb stop command failed.");
                         cameraState = CameraStates.cameraError; // Ensure error state if stop failed
                         imageReady = false;
                     }
@@ -1766,25 +1771,84 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 }
                 catch (Exception ex)
                 {
-                    LogMessage("OnBulbExposureTimerElapsed", $"Error stopping bulb exposure or checking image: {ex.Message}\n{ex.StackTrace}");
+                    LogMessage("OnBulbExposureTimerElapsed", $"Error stopping bulb exposure or starting poll task: {ex.Message}\n{ex.StackTrace}");
                     cameraState = CameraStates.cameraError;
                     imageReady = false;
                 }
                 finally
                 {
-                    // Free the allocated memory for the pointers
+                    // Free the allocated memory for the pointers used in the Release call
                     if (shotOptPtr != IntPtr.Zero) Marshal.FreeHGlobal(shotOptPtr);
                     if (statusPtr != IntPtr.Zero) Marshal.FreeHGlobal(statusPtr);
 
-                    // Ensure state moves away from exposing if not already error/idle
-                    if (cameraState == CameraStates.cameraExposing)
-                    {
-                        LogMessage("OnBulbExposureTimerElapsed", "State still 'Exposing' after checks/errors, setting to 'Idle'.");
-                        cameraState = CameraStates.cameraIdle; // Move to idle if checks didn't change state
-                        imageReady = false; // Ensure imageReady is false if we force idle here
-                    }
+                    // *** IMPORTANT: Do NOT set cameraState here. The polling task will handle it. ***
+                    // // Ensure state moves away from exposing if not already error/idle
+                    // // CheckForImageData will set to Idle if successful, or Error if exception occurred there.
+                    // if (cameraState == CameraStates.cameraExposing)
+                    // {
+                    //     LogMessage("OnBulbExposureTimerElapsed", "State still 'Exposing' after checks/errors, setting to 'Idle'.");
+                    //     cameraState = CameraStates.cameraIdle; // Move to idle if checks didn't change state
+                    //     imageReady = false; // Ensure imageReady is false if we force idle here
+                    // }
                 }
             } // End Lock
+        }
+
+        // *** NEW: Background task to poll for image after bulb stop ***
+        private static async Task PollForBulbImage()
+        {
+            const int pollIntervalMs = 500; // Check every 500ms
+            const int timeoutSeconds = 15; // Give up after 15 seconds
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            bool foundImage = false;
+
+            LogMessage("PollForBulbImage", $"Polling started. Timeout: {timeoutSeconds}s, Interval: {pollIntervalMs}ms");
+
+            while (stopwatch.Elapsed.TotalSeconds < timeoutSeconds)
+            {
+                // Check if connected before calling CheckForImageData
+                lock (hardwareLock) // Use hardwareLock for checking IsConnected
+                {
+                    if (!IsConnected)
+                    {
+                        LogMessage("PollForBulbImage", "Disconnected during polling. Aborting poll.");
+                        // State should likely already be handled by disconnect logic, but ensure error state
+                        lock (exposureLock) { cameraState = CameraStates.cameraError; imageReady = false; }
+                        return; // Exit the task
+                    }
+                }
+
+                // Call CheckForImageData - this will acquire its own lock
+                CheckForImageData();
+
+                // Check if the image became ready (use lock for thread safety)
+                lock (exposureLock)
+                {
+                    if (imageReady)
+                    {
+                        foundImage = true;
+                        LogMessage("PollForBulbImage", $"Image found after {stopwatch.Elapsed.TotalSeconds:F1}s. Polling successful.");
+                        // CheckForImageData already set state to Idle
+                        break; // Exit the loop
+                    }
+                }
+
+                // Wait before next poll
+                await Task.Delay(pollIntervalMs);
+            }
+
+            stopwatch.Stop();
+
+            // Handle timeout
+            if (!foundImage)
+            {
+                lock (exposureLock)
+                {
+                    LogMessage("PollForBulbImage", $"Polling timed out after {timeoutSeconds}s. Image not found.");
+                    cameraState = CameraStates.cameraError; // Set error state on timeout
+                    imageReady = false;
+                }
+            }
         }
 
 
