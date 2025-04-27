@@ -22,6 +22,14 @@
 //      Added null checks for currentConfig and currentConfig.SdkConstants.
 // Mod: Added check in Connected property setter to skip XSDK_SetMode for camera models
 //      that use physical dials for P/A/S/M selection (e.g., X-T5), preventing UNSUPPORTED errors.
+// Fix: Modified DownloadImageData to correctly check against all configured RAW formats
+//      and delete non-RAW images from the buffer instead of attempting to process them.
+// Mod: Added calls in Connected property setter to attempt setting Image Quality to RAW Only
+//      (using value from JSON) and RAW Compression to Uncompressed (using standard SDK value 0).
+// Mod: Added logic in StartExposure to reset cameraState from cameraError to cameraIdle,
+//      allowing new exposures after a download failure.
+// Mod: Added fallback in CacheCameraCapabilities to use DefaultBulbCapable from JSON
+//      if the SDK reports Bulb=false unexpectedly.
 
 using ASCOM;
 using ASCOM.Astrometry.AstroUtils;
@@ -212,6 +220,10 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         public const int XSDK_DRANGE_400 = 400;
         public const int XSDK_DRANGE_800 = 800;
 
+        // RAW Compression (From XAPIOpt.h)
+        public const int SDK_RAW_COMPRESSION_OFF = 0;
+        public const int SDK_RAW_COMPRESSION_LOSSLESS = 1;
+        public const int SDK_RAW_COMPRESSION_LOSSY = 2; // Added for completeness
 
         #endregion
 
@@ -282,6 +294,11 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_ReadImage")]
         public static extern int XSDK_ReadImage(IntPtr hCamera, IntPtr pData, uint ulDataSize);
 
+        // *** ADDED XSDK_DeleteImage ***
+        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_DeleteImage")]
+        public static extern int XSDK_DeleteImage(IntPtr hCamera);
+        // *** END ADDED ***
+
         [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetBufferCapacity")]
         public static extern int XSDK_GetBufferCapacity(IntPtr hCamera, out int plShootFrameNum, out int plTotalFrameNum);
 
@@ -289,6 +306,20 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         public static extern int XSDK_SetDRange(IntPtr hCamera, int lDRange);
         [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetDRange")]
         public static extern int XSDK_GetDRange(IntPtr hCamera, out int plDRange);
+
+        // *** ADDED Image Quality and RAW Compression Signatures ***
+        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_SetImageQuality")]
+        public static extern int XSDK_SetImageQuality(IntPtr hCamera, int lImageQuality);
+
+        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetImageQuality")]
+        public static extern int XSDK_GetImageQuality(IntPtr hCamera, out int plImageQuality);
+
+        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_SetRAWCompression")]
+        public static extern int XSDK_SetRAWCompression(IntPtr hCamera, int lRAWCompression);
+
+        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetRAWCompression")]
+        public static extern int XSDK_GetRAWCompression(IntPtr hCamera, out int plRAWCompression);
+        // *** END ADDED ***
 
         #endregion
 
@@ -799,9 +830,43 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                             }
                             // --- End Set/Check Exposure Mode ---
 
+                            // *** ADDED: Attempt to set RAW Only + Uncompressed ***
+                            LogMessage("Connected Set", "Step 5.7: Attempting to set Image Quality and RAW Compression...");
+                            try
+                            {
+                                // Set Image Quality to RAW Only (using value from JSON)
+                                int rawOnlyQualityCode = currentConfig.SdkConstants.ImageQualityRaw;
+                                LogMessage("Connected Set", $"Setting Image Quality to RAW Only (Code: {rawOnlyQualityCode})...");
+                                int iqResult = FujifilmSdkWrapper.XSDK_SetImageQuality(hCamera, rawOnlyQualityCode);
+                                FujifilmSdkWrapper.CheckSdkError(hCamera, iqResult, $"XSDK_SetImageQuality(RAW Only - Code: {rawOnlyQualityCode})");
+                                LogMessage("Connected Set", "Image Quality set to RAW Only.");
+
+                                // Set RAW Compression to Uncompressed (using standard SDK value 0)
+                                int uncompressedCode = FujifilmSdkWrapper.SDK_RAW_COMPRESSION_OFF; // Should be 0
+                                LogMessage("Connected Set", $"Setting RAW Compression to Uncompressed (Code: {uncompressedCode})...");
+                                int rcResult = FujifilmSdkWrapper.XSDK_SetRAWCompression(hCamera, uncompressedCode);
+                                FujifilmSdkWrapper.CheckSdkError(hCamera, rcResult, $"XSDK_SetRAWCompression(Uncompressed - Code: {uncompressedCode})");
+                                LogMessage("Connected Set", "RAW Compression set to Uncompressed.");
+
+                                // Optional: Verify settings
+                                int currentIQ, currentRC;
+                                if (FujifilmSdkWrapper.XSDK_GetImageQuality(hCamera, out currentIQ) == FujifilmSdkWrapper.XSDK_COMPLETE)
+                                    LogMessage("Connected Set", $"Verified Image Quality: {currentIQ}");
+                                else LogMessage("Connected Set", "Warning: Could not verify Image Quality.");
+                                if (FujifilmSdkWrapper.XSDK_GetRAWCompression(hCamera, out currentRC) == FujifilmSdkWrapper.XSDK_COMPLETE)
+                                    LogMessage("Connected Set", $"Verified RAW Compression: {currentRC}");
+                                else LogMessage("Connected Set", "Warning: Could not verify RAW Compression.");
+
+                            }
+                            catch (Exception settingsEx)
+                            {
+                                // Log error but don't fail connection - user might need to set manually
+                                LogMessage("Connected Set", $"WARNING: Failed to set RAW/Uncompressed settings: {settingsEx.Message}. Please check camera settings manually.");
+                            }
+                            // *** END ADDED ***
 
                             // --- Removed attempt to Set Focus Mode via SetProp ---
-                            LogMessage("Connected Set", "Step 5.7: Skipping Focus Mode set (requires reliable SDK method or manual camera setting).");
+                            LogMessage("Connected Set", "Step 5.8: Skipping Focus Mode set (requires reliable SDK method or manual camera setting).");
                             // --- End Removed Code ---
 
 
@@ -1046,15 +1111,36 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         public static void StartExposure(double duration, bool light)
         {
             CheckConnected("StartExposure");
+
+            // *** ADDED: Reset from error state if necessary ***
+            lock (exposureLock) // Lock needed to safely check and modify cameraState
+            {
+                if (cameraState == CameraStates.cameraError)
+                {
+                    LogMessage("StartExposure", $"Camera was in error state. Resetting to Idle.");
+                    cameraState = CameraStates.cameraIdle;
+                    imageReady = false; // Ensure imageReady is also reset
+                    lastImageArray = null;
+                }
+            }
+            // *** END ADDED ***
+
             lock (exposureLock)
             {
+                // Now perform the original check
                 if (cameraState != CameraStates.cameraIdle) throw new InvalidOperationException($"Camera not idle. State: {cameraState}");
+
                 LogMessage("StartExposure", $"Request: Duration={duration}s, Light Frame={light}");
 
                 // Check against cached min/max exposure values
                 if (duration < minExposure) { LogMessage("StartExposure", $"Requested duration {duration}s is less than minimum {minExposure}s."); throw new InvalidValueException("StartExposure Duration", duration.ToString(), $"Minimum exposure is {minExposure}"); }
-                // Check against max *non-bulb* exposure if bulb isn't supported OR if duration doesn't require bulb
-                if (!bulbCapable && duration > maxExposure) { LogMessage("StartExposure", $"Requested duration {duration}s exceeds max coded exposure {maxExposure}s and Bulb is not supported."); throw new InvalidValueException("StartExposure Duration", duration.ToString(), $"Bulb mode not supported, maximum exposure is {maxExposure}"); }
+
+                // *** MODIFIED: Check bulbCapable field directly ***
+                if (!bulbCapable && duration > maxExposure)
+                {
+                    LogMessage("StartExposure", $"Requested duration {duration}s exceeds max coded exposure {maxExposure}s and Bulb is not supported (bulbCapable={bulbCapable}).");
+                    throw new InvalidValueException("StartExposure Duration", duration.ToString(), $"Bulb mode not supported, maximum exposure is {maxExposure}");
+                }
                 // Note: If bulbCapable is true, we allow durations > maxExposure
 
                 IntPtr shotOptPtr = IntPtr.Zero; // Pointer for the long* parameter
@@ -1088,10 +1174,12 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     int sdkShutterSpeed = DurationToSdkShutterSpeed(duration); // Gets -1 if bulb needed
                     int isBulb = (sdkShutterSpeed == FujifilmSdkWrapper.XSDK_SHUTTER_BULB) ? 1 : 0;
 
+                    // *** MODIFIED: Check bulbCapable field directly ***
                     if (isBulb == 1 && !bulbCapable)
                     {
-                        LogMessage("StartExposure", $"Error: Bulb exposure requested ({duration}s) but camera config/capabilities indicate Bulb is not supported.");
-                        throw new InvalidValueException("StartExposure Duration", duration.ToString(), "Internal Error: Bulb exposure requested but camera config indicates Bulb is not supported.");
+                        LogMessage("StartExposure", $"Error: Bulb exposure requested ({duration}s) but camera config/capabilities indicate Bulb is not supported (bulbCapable={bulbCapable}).");
+                        // Throw a more informative exception if possible
+                        throw new InvalidValueException("StartExposure Duration", duration.ToString(), "Internal Error: Bulb exposure requested but camera capabilities indicate Bulb is not supported.");
                     }
 
                     LogMessage("StartExposure", $"Setting SDK Shutter Speed Code: {sdkShutterSpeed}, Bulb Flag: {isBulb}");
@@ -1433,12 +1521,25 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 LogMessage("CacheCameraCapabilities", "Querying Shutter Speed capabilities...");
                 int bulbCapResult = 0;
                 int[] sdkShutterCodes = FujifilmSdkWrapper.GetIntArrayFromSdkShutterSpeed(hCamera, out bulbCapResult);
-                bulbCapable = (bulbCapResult == 1);
+                bool sdkBulbCapable = (bulbCapResult == 1); // Store SDK result temporarily
 
                 if (sdkShutterCodes != null && sdkShutterCodes.Length > 0)
                 {
                     supportedShutterSpeeds = sdkShutterCodes.ToList();
-                    LogMessage("CacheCameraCapabilities", $"Retrieved {supportedShutterSpeeds.Count} shutter speed codes. Bulb Capable: {bulbCapable}");
+                    LogMessage("CacheCameraCapabilities", $"Retrieved {supportedShutterSpeeds.Count} shutter speed codes. SDK Bulb Capable: {sdkBulbCapable}");
+
+                    // *** MODIFIED: Fallback logic for bulbCapable ***
+                    if (!sdkBulbCapable && currentConfig.DefaultBulbCapable)
+                    {
+                        LogMessage("CacheCameraCapabilities", $"WARNING: SDK reported Bulb NOT capable, but config default is TRUE. Using config default.");
+                        bulbCapable = true; // Override with JSON default
+                    }
+                    else
+                    {
+                        bulbCapable = sdkBulbCapable; // Use SDK value
+                    }
+                    LogMessage("CacheCameraCapabilities", $"Final Bulb Capable setting: {bulbCapable}");
+                    // *** END MODIFIED ***
 
                     // Update min/max exposure based on *actual* supported codes and the map
                     List<double> validDurations = new List<double>();
@@ -1759,7 +1860,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 LogMessage("DownloadImageData", $"Expecting image: {imgInfo.lImagePixWidth}x{imgInfo.lImagePixHeight}, Size: {imgInfo.lDataSize}, Format: {imgInfo.lFormat:X}");
 
                 // --- Check Format using loaded config ---
-                // Check against the known RAW format codes from the loaded configuration
+                // *** MODIFIED: Check against ALL configured RAW codes ***
                 bool isRawFormat = (imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRaw ||
                                     imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRawFine ||
                                     imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRawNormal ||
@@ -1768,8 +1869,29 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
                 if (!isRawFormat)
                 {
-                    LogMessage("DownloadImageData", $"Unsupported image format {imgInfo.lFormat:X} for Bayer data retrieval based on current config. Expected RAW codes: {currentConfig.SdkConstants.ImageQualityRaw}, {currentConfig.SdkConstants.ImageQualityRawFine}, etc.");
-                    throw new DriverException($"Unsupported image format {imgInfo.lFormat:X} for Bayer data retrieval. Ensure camera saves RAW according to loaded configuration.");
+                    LogMessage("DownloadImageData", $"Format {imgInfo.lFormat:X} is not a configured RAW format. Deleting from buffer.");
+                    try
+                    {
+                        int deleteResult = FujifilmSdkWrapper.XSDK_DeleteImage(hCamera);
+                        if (deleteResult != FujifilmSdkWrapper.XSDK_COMPLETE)
+                        {
+                            LogMessage("DownloadImageData", $"Warning: Failed to delete non-RAW image (Format {imgInfo.lFormat:X}) from buffer. SDK Error: {deleteResult}");
+                            // Optionally log detailed error using CheckSdkError without throwing
+                        }
+                        else
+                        {
+                            LogMessage("DownloadImageData", $"Successfully deleted non-RAW image (Format {imgInfo.lFormat:X}) from buffer.");
+                        }
+                    }
+                    catch (Exception deleteEx)
+                    {
+                        LogMessage("DownloadImageData", $"Exception while deleting non-RAW image: {deleteEx.Message}");
+                    }
+                    // Set lastImageArray to null and return. The get_ImageArray property will handle the retry.
+                    lastImageArray = null;
+                    cameraState = CameraStates.cameraIdle; // Go back to idle to allow retry
+                    return; // Exit the method, don't attempt download/process
+                    // --- END MODIFIED: Delete non-RAW and return ---
                 }
                 // --- End Format Check ---
 
