@@ -20,6 +20,8 @@
 // Mod: Removed hardcoded GFX100S constants from FujifilmSdkWrapper and replaced
 //      their usage with dynamic lookups from CameraHardware.currentConfig.SdkConstants.
 //      Added null checks for currentConfig and currentConfig.SdkConstants.
+// Mod: Added check in Connected property setter to skip XSDK_SetMode for camera models
+//      that use physical dials for P/A/S/M selection (e.g., X-T5), preventing UNSUPPORTED errors.
 
 using ASCOM;
 using ASCOM.Astrometry.AstroUtils;
@@ -247,6 +249,11 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
         [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetMode")]
         public static extern int XSDK_GetMode(IntPtr hCamera, out int plMode);
+
+        // *** ADDED XSDK_GetAEMode for diagnostic check ***
+        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetAEMode")]
+        public static extern int XSDK_GetAEMode(IntPtr hCamera, out int plAEMode);
+        // *** END ADDED ***
 
         [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_CapSensitivity")]
         public static extern int XSDK_CapSensitivity(IntPtr hCamera, int lDR, out int plNumSensitivity, IntPtr plSensitivity);
@@ -736,31 +743,62 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                             // --- End Load Configuration ---
 
                             // --- Set Exposure Mode to Manual using loaded config ---
-                            LogMessage("Connected Set", "Step 5.6: Setting Exposure Mode to Manual (M) using loaded config...");
-                            int manualModeCode = currentConfig.SdkConstants.ModeManual;
-                            int modeResult = FujifilmSdkWrapper.XSDK_SetMode(hCamera, manualModeCode);
-                            FujifilmSdkWrapper.CheckSdkError(hCamera, modeResult, $"XSDK_SetMode(Manual - Code: {manualModeCode})");
-                            LogMessage("Connected Set", "Exposure Mode set to Manual (M).");
+                            // *** ADDED CHECK: Only set mode if the camera model requires it ***
+                            // List of models known to have software-settable PASM modes (e.g., via a mode dial)
+                            List<string> modelsRequiringSetMode = new List<string> { "X-S10", "X-S20" };
 
-                            // --- Verify Mode ---
-                            int currentMode;
-                            int getModeResult = FujifilmSdkWrapper.XSDK_GetMode(hCamera, out currentMode);
-                            if (getModeResult == FujifilmSdkWrapper.XSDK_COMPLETE)
+                            if (modelsRequiringSetMode.Contains(detectedModelName, StringComparer.OrdinalIgnoreCase))
                             {
-                                LogMessage("Connected Set", $"Verified camera exposure mode is now: {currentMode} (Expected {manualModeCode})");
-                                if (currentMode != manualModeCode)
+                                LogMessage("Connected Set", $"Step 5.6: Setting Exposure Mode to Manual (M) for model {detectedModelName} using loaded config...");
+                                int manualModeCode = currentConfig.SdkConstants.ModeManual;
+                                int modeResult = FujifilmSdkWrapper.XSDK_SetMode(hCamera, manualModeCode);
+                                FujifilmSdkWrapper.CheckSdkError(hCamera, modeResult, $"XSDK_SetMode(Manual - Code: {manualModeCode})");
+                                LogMessage("Connected Set", "Exposure Mode set to Manual (M).");
+
+                                // --- Verify Mode ---
+                                int currentMode;
+                                int getModeResult = FujifilmSdkWrapper.XSDK_GetMode(hCamera, out currentMode);
+                                if (getModeResult == FujifilmSdkWrapper.XSDK_COMPLETE)
                                 {
-                                    LogMessage("Connected Set", $"CRITICAL WARNING: SetMode succeeded but GetMode returned unexpected mode {currentMode}!");
-                                    // Optional: throw an exception here if Mode M is absolutely essential
-                                    // throw new DriverException($"Failed to confirm Manual (M) mode after setting. Current mode: {currentMode}");
+                                    LogMessage("Connected Set", $"Verified camera exposure mode is now: {currentMode} (Expected {manualModeCode})");
+                                    if (currentMode != manualModeCode)
+                                    {
+                                        LogMessage("Connected Set", $"CRITICAL WARNING: SetMode succeeded but GetMode returned unexpected mode {currentMode}!");
+                                        // Optional: throw an exception here if Mode M is absolutely essential
+                                        // throw new DriverException($"Failed to confirm Manual (M) mode after setting. Current mode: {currentMode}");
+                                    }
                                 }
+                                else
+                                {
+                                    LogMessage("Connected Set", $"Warning: XSDK_GetMode failed with result {getModeResult} after setting exposure mode.");
+                                }
+                                // --- End Verify Mode ---
                             }
                             else
                             {
-                                LogMessage("Connected Set", $"Warning: XSDK_GetMode failed with result {getModeResult} after setting exposure mode.");
+                                LogMessage("Connected Set", $"Step 5.6: Skipping XSDK_SetMode for model {detectedModelName} (mode likely set by physical dials).");
+                                // Optionally, get the current AE Mode determined by dials for logging/verification
+                                try
+                                {
+                                    int currentAEMode;
+                                    int getAEModeResult = FujifilmSdkWrapper.XSDK_GetAEMode(hCamera, out currentAEMode);
+                                    if (getAEModeResult == FujifilmSdkWrapper.XSDK_COMPLETE)
+                                    {
+                                        LogMessage("Connected Set", $"Current AE Mode detected via GetAEMode: {currentAEMode}");
+                                    }
+                                    else
+                                    {
+                                        LogMessage("Connected Set", $"Warning: Could not get current AE Mode via GetAEMode (Result: {getAEModeResult})");
+                                        // Don't throw here, just log the warning
+                                    }
+                                }
+                                catch (Exception aeEx)
+                                {
+                                    LogMessage("Connected Set", $"Warning: Exception during diagnostic GetAEMode: {aeEx.Message}");
+                                }
                             }
-                            // --- End Verify Mode ---
-                            // --- End Set Exposure Mode ---
+                            // --- End Set/Check Exposure Mode ---
+
 
                             // --- Removed attempt to Set Focus Mode via SetProp ---
                             LogMessage("Connected Set", "Step 5.7: Skipping Focus Mode set (requires reliable SDK method or manual camera setting).");
