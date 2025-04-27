@@ -1,5 +1,5 @@
 {
-  "ModelName": "X-T3",
+  "ModelName": "X-H2S",
   "CameraXSize": 6240,
   "CameraYSize": 4160,
   "PixelSizeX": 3.76,
@@ -8,7 +8,7 @@
   "DefaultMinSensitivity": 160,
   "DefaultMaxSensitivity": 12800,
   "DefaultMinExposure": 0.00003125,
-  "DefaultMaxExposure": 3600.0,
+  "DefaultMaxExposure": 900.0,
   "DefaultBulbCapable": true,
   "SdkConstants": {
     "ModeManual": 4353,
