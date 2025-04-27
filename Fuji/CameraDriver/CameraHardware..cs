@@ -1,35 +1,7 @@
 ﻿// ASCOM Camera hardware class for ScdouglasFujifilm
-// Author: S. Douglas <your@email.here>
+// Author: Sean Douglas scdouglas1999@gmail.com
 // Description: Interfaces with the Fujifilm X SDK to control Fujifilm cameras.
 // Implements: ASCOM Camera interface version: 3
-// Fix: Added explicit XSDK_RELEASE_S1ON call before XSDK_RELEASE_BULBS2_ON
-//      when starting Bulb exposures, based on user example and common SDK patterns.
-//      Ensured plShotOpt is allocated for all Release calls.
-//      Uses XSDK_RELEASE_N_BULBS2OFF (0x0008) to stop Bulb.
-//      Preserved the exact code structure provided by the user.
-// Fix: Implemented SDK calls in CacheCameraCapabilities to retrieve actual
-//      ISO sensitivity range using XSDK_CapSensitivity.
-//      Updated Gain Min/Max based on retrieved capabilities.
-//      Ensured Gain Get/Set use XSDK_GetSensitivity/XSDK_SetSensitivity.
-// Fix: Removed undefined SDK_RELEASE_MODE_* constants.
-// Fix: Changed CacheCameraCapabilities to query sensitivity for XSDK_DRANGE_100.
-// Fix: Removed duplicated CameraHardware class definition.
-// Fix: Re-implemented GetIntArrayFromSdkSensitivity using a carefully managed
-//      temporary pointer for the first call to XSDK_CapSensitivity to avoid
-//      potential SDK issues with NULL pointers, addressing protected memory errors.
-// Mod: Removed hardcoded GFX100S constants from FujifilmSdkWrapper and replaced
-//      their usage with dynamic lookups from CameraHardware.currentConfig.SdkConstants.
-//      Added null checks for currentConfig and currentConfig.SdkConstants.
-// Mod: Added check in Connected property setter to skip XSDK_SetMode for camera models
-//      that use physical dials for P/A/S/M selection (e.g., X-T5), preventing UNSUPPORTED errors.
-// Fix: Modified DownloadImageData to correctly check against all configured RAW formats
-//      and delete non-RAW images from the buffer instead of attempting to process them.
-// Mod: Added calls in Connected property setter to attempt setting Image Quality to RAW Only
-//      (using value from JSON) and RAW Compression to Uncompressed (using standard SDK value 0).
-// Mod: Added logic in StartExposure to reset cameraState from cameraError to cameraIdle,
-//      allowing new exposures after a download failure.
-// Mod: Added fallback in CacheCameraCapabilities to use DefaultBulbCapable from JSON
-//      if the SDK reports Bulb=false unexpectedly.
 
 using ASCOM;
 using ASCOM.Astrometry.AstroUtils;
@@ -1700,6 +1672,8 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
                 IntPtr shotOptPtr = IntPtr.Zero;
                 long shotOptValue = 0;
+                int s1OffResult = -1;
+                int bulbOffResult = -1;
 
                 try
                 {
@@ -1710,33 +1684,49 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                         return;
                     }
 
-                    // --- Send second Release command to STOP Bulb ---
-                    shotOptPtr = Marshal.AllocHGlobal(sizeof(long));
-                    Marshal.WriteInt64(shotOptPtr, shotOptValue);
-                    LogMessage("OnBulbExposureTimerElapsed", $"Allocated plShotOpt for STOP at {shotOptPtr}");
+                    // *** MODIFIED: Send S1 OFF *before* BULBS2 OFF ***
 
-                    // *** Use the defined BULBS2_OFF command ***
-                    // *** Uses 0x0008 from XAPI.h ***
-                    int releaseModeStop = FujifilmSdkWrapper.XSDK_RELEASE_N_BULBS2OFF;
-                    LogMessage("OnBulbExposureTimerElapsed", $"Triggering exposure STOP via XSDK_Release (Mode: 0x{releaseModeStop:X}, Options Ptr: {shotOptPtr})...");
-                    int releaseStatus;
-                    int releaseResult = FujifilmSdkWrapper.XSDK_Release(hCamera, releaseModeStop, shotOptPtr, out releaseStatus);
-                    LogMessage("OnBulbExposureTimerElapsed", $"XSDK_Release (STOP) returned {releaseResult}, status={releaseStatus}");
-
-                    // Check for errors, but don't make it fatal if stopping fails, still check for image
-                    if (releaseResult != FujifilmSdkWrapper.XSDK_COMPLETE)
+                    // 1. Send S1 OFF command
+                    LogMessage("OnBulbExposureTimerElapsed", "Sending S1 OFF command first...");
+                    // Using IntPtr.Zero for shot options, as per example for S1 OFF
+                    s1OffResult = FujifilmSdkWrapper.XSDK_Release(hCamera, FujifilmSdkWrapper.XSDK_RELEASE_N_S1OFF, IntPtr.Zero, out _);
+                    if (s1OffResult != FujifilmSdkWrapper.XSDK_COMPLETE)
                     {
-                        LogMessage("OnBulbExposureTimerElapsed", $"WARNING: XSDK_Release (STOP) failed with result {releaseResult}. Image might not be available.");
-                        // Optionally log the specific SDK error using CheckSdkError logic without throwing
-                        // try { FujifilmSdkWrapper.CheckSdkError(hCamera, releaseResult, "XSDK_Release (Stop Bulb - Non-Fatal)"); } catch (Exception sdkEx) { LogMessage("OnBulbExposureTimerElapsed", $"SDK Error details on stop: {sdkEx.Message}");}
+                        LogMessage("OnBulbExposureTimerElapsed", $"WARNING: XSDK_Release (S1 OFF) failed with result {s1OffResult}.");
+                        // Optionally log detailed error
                     }
                     else
                     {
-                        LogMessage("OnBulbExposureTimerElapsed", $"SDK Release command (STOP) sent successfully.");
+                        LogMessage("OnBulbExposureTimerElapsed", "S1 OFF command sent successfully.");
                     }
+                    // Add a small delay between commands if needed
+                    // System.Threading.Thread.Sleep(50);
+
+                    // 2. Send BULBS2 OFF command
+                    shotOptPtr = Marshal.AllocHGlobal(sizeof(long));
+                    Marshal.WriteInt64(shotOptPtr, shotOptValue);
+                    LogMessage("OnBulbExposureTimerElapsed", $"Allocated plShotOpt for BULBS2_OFF at {shotOptPtr}");
+
+                    int releaseModeStop = FujifilmSdkWrapper.XSDK_RELEASE_N_BULBS2OFF; // 0x0008
+                    LogMessage("OnBulbExposureTimerElapsed", $"Triggering exposure STOP via XSDK_Release (Mode: 0x{releaseModeStop:X}, Options Ptr: {shotOptPtr})...");
+                    int releaseStatus;
+                    bulbOffResult = FujifilmSdkWrapper.XSDK_Release(hCamera, releaseModeStop, shotOptPtr, out releaseStatus);
+                    LogMessage("OnBulbExposureTimerElapsed", $"XSDK_Release (BULBS2_OFF) returned {bulbOffResult}, status={releaseStatus}");
+
+                    if (bulbOffResult != FujifilmSdkWrapper.XSDK_COMPLETE)
+                    {
+                        LogMessage("OnBulbExposureTimerElapsed", $"WARNING: XSDK_Release (BULBS2_OFF) failed with result {bulbOffResult}. Image might not be available.");
+                        // Optionally log detailed error
+                    }
+                    else
+                    {
+                        LogMessage("OnBulbExposureTimerElapsed", $"SDK Release command (BULBS2_OFF) sent successfully.");
+                    }
+                    // *** END MODIFIED ORDER ***
+
 
                     // Add a small delay to allow camera to process the stop command and write buffer
-                    LogMessage("OnBulbExposureTimerElapsed", "Adding short delay after stop command...");
+                    LogMessage("OnBulbExposureTimerElapsed", "Adding short delay after stop commands...");
                     System.Threading.Thread.Sleep(500); // 500ms delay, adjust if needed
 
                     // Now check for the image data using the helper method
