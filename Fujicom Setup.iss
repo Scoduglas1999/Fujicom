@@ -5,44 +5,42 @@
 ; Use '.' for the source root since the script is in the root.
 #define SourceRoot "." 
 
-; !!! Updated target framework moniker for .NET Framework 4.7.2 !!!
-#define TargetFramework "net472" 
-#define LibRawWrapperOutputPath SourceRoot + "\LibRawWrapper\bin\Release\" + TargetFramework
-
-; Path to the main Fuji driver output (assuming Release configuration)
-#define FujiOutputPath SourceRoot + "\Fuji\bin\Release" 
+; *** All build output goes to this single directory ***
+#define BuildOutputPath SourceRoot + "\Fuji\bin\Release" 
 
 ; Path to installer resources (copied from ASCOM SDK)
-#define InstallerResourcesPath SourceRoot + "\InstallerResources" 
+#define InstallerResourcesPath SourceRoot + "\InstallerResources"
+
+; Define the App Name here to avoid repetition and potential typos
+#define MyAppName "ASCOM Fujicom Camera Driver"
+; Define the App Version here for consistency
+#define MyAppVersion "1.0"
+; Define the full Version Info string (major.minor.build)
+#define MyAppVersionInfo "1.0.0" 
 
 ; --- Setup Section ---
 [Setup]
 ; Use the same unique AppID generated for your driver
 AppID={{92e40f6e-9299-4666-95d1-75c962b70abb}
-AppName=ASCOM Fujicom Camera Driver
-AppVerName=ASCOM Fujicom Camera Driver 1.0
-AppVersion=1.0
+AppName={#MyAppName}
+AppVerName={#MyAppName} {#MyAppVersion} 
+AppVersion={#MyAppVersion} 
 AppPublisher=Sean Douglas <scdouglas1999@gmail.com>
 AppPublisherURL=mailto:scdouglas1999@gmail.com
 AppSupportURL=https://ascomtalk.groups.io/g/Help ; Link to your support forum/page
 AppUpdatesURL=https://ascom-standards.org/ ; Link to driver download page if available
-VersionInfoVersion=1.0.0
-; Minimum Windows version (Win 7 SP1). You might increase this if needed.
-MinVersion=6.1.7601 
-; Installs to C:\Program Files (x86)\Common Files\ASCOM\Camera\ASCOM Fujicom Camera Driver
-DefaultDirName="{cf}\ASCOM\Camera\{#AppName}" 
+VersionInfoVersion={#MyAppVersionInfo} 
+MinVersion=6.1sp1 
+DefaultDirName="{commoncf}\ASCOM\Camera\{#MyAppName}" 
 DisableDirPage=yes
 DisableProgramGroupPage=yes
-; Place the compiled setup file in the SourceRoot (Fujicom folder)
 OutputDir="{#SourceRoot}"
-OutputBaseFilename="Fujicom Setup v{#AppVersion}" ; Include version in filename
+OutputBaseFilename="Fujicom Setup v{#MyAppVersion}" 
 Compression=lzma
 SolidCompression=yes
-; Use relative paths for wizard image and license (after copying them)
 WizardImageFile="{#InstallerResourcesPath}\WizardImage.bmp"
 LicenseFile="{#InstallerResourcesPath}\CreativeCommons.txt" 
-; Uninstaller data folder - ensure this matches the structure derived from AppName
-UninstallFilesDir="{cf}\ASCOM\Uninstall\Camera\{#AppName}"
+UninstallFilesDir="{commoncf}\ASCOM\Uninstall\Camera\{#MyAppName}"
 
 ; --- Languages Section ---
 [Languages]
@@ -50,30 +48,103 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 ; --- Dirs Section ---
 [Dirs]
-; Create the directory for uninstaller data if it doesn't exist
-Name: "{cf}\ASCOM\Uninstall\Camera\{#AppName}"
+Name: "{commoncf}\ASCOM\Uninstall\Camera\{#MyAppName}"
 
 ; --- Files Section ---
-; List all files needed by the driver, using relative paths from SourceRoot.
+; List all files needed by the driver, using the single build output path.
+; Ensure all these files exist in the folder defined by BuildOutputPath before compiling!
 [Files]
-; Main driver executable - MUST exist at FujiOutputPath relative to script
-Source: "{#FujiOutputPath}\ASCOM.ScdouglasFujifilm.exe"; DestDir: "{app}"; Flags: ignoreversion
+; Main driver executable and its config file
+Source: "{#BuildOutputPath}\ASCOM.ScdouglasFujifilm.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\ASCOM.ScdouglasFujifilm.exe.config"; DestDir: "{app}"; Flags: ignoreversion
 
-; LibRawWrapper DLL - MUST exist at LibRawWrapperOutputPath relative to script
-; *** Verify that LibRawWrapper.dll is actually in \bin\Release\net472\ ***
-Source: "{#LibRawWrapperOutputPath}\LibRawWrapper.dll"; DestDir: "{app}"; Flags: ignoreversion
+; LibRaw Wrapper and native DLL
+Source: "{#BuildOutputPath}\LibRawWrapper.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\libraw.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\Sdcb.LibRaw.dll"; DestDir: "{app}"; Flags: ignoreversion ;
 
-; Native libraw DLL (Assuming x64 and copied to Fuji output dir by build process) 
-; !!! Verify this location and filename are correct !!!
-Source: "{#FujiOutputPath}\libraw.dll"; DestDir: "{app}"; Flags: ignoreversion
+; Fujifilm Specific DLLs (Verify redistribution rights)
+Source: "{#BuildOutputPath}\XAPI.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FTLPTP.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FTLPTPIP.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0000API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0001API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0002API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0003API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0004API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0005API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0006API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0007API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0008API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0009API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0010API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0011API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0012API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0013API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0014API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0015API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0016API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0017API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0018API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0019API.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\FF0020API.dll"; DestDir: "{app}"; Flags: ignoreversion 
 
-; Include any other DLLs required by LibRawWrapper or libraw.dll itself
-; For example, if it needs specific C++ runtime DLLs and you are not relying on the user having the VC++ Redist installed:
-; Source: "{#FujiOutputPath}\msvcp140.dll"; DestDir: "{app}"; Flags: ignoreversion
-; Source: "{#FujiOutputPath}\vcruntime140.dll"; DestDir: "{app}"; Flags: ignoreversion
-; (Uncomment and adjust above lines only if necessary and licensed for redistribution)
+; Common Libraries (Often included via NuGet)
+Source: "{#BuildOutputPath}\Newtonsoft.Json.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\System.Buffers.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\System.Memory.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\System.Runtime.CompilerServices.Unsafe.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\System.Text.Encodings.Web.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\System.Text.Json.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\System.Threading.Tasks.Extensions.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\Microsoft.Bcl.AsyncInterfaces.dll"; DestDir: "{app}"; Flags: ignoreversion 
+; *** ADDED MISSING DEPENDENCY ***
+Source: "{#BuildOutputPath}\System.Numerics.Vectors.dll"; DestDir: "{app}"; Flags: ignoreversion 
 
-; ReadMe file (Assuming it's in the Fuji project folder)
+; JSON Configuration/Data Files (Assuming these are needed at runtime)
+Source: "{#BuildOutputPath}\GFX50R.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX50S.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX100.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX100S.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-H2.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-H2S.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-M5.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-Pro3.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-S20.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-T2.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-T3.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-T4.json"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-T5.json"; DestDir: "{app}"; Flags: ignoreversion 
+
+; Header Files (Included based on user request, but likely NOT needed for runtime)
+Source: "{#BuildOutputPath}\XAPI.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\XAPIOpt.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\XAPIOpt_MOV.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX50R.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX50S.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX50SII.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX100.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX100II.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX100II_MOV.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX100S.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX100SII.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\GFX100SII_MOV.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-H2.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-H2_MOV.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-H2S.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-H2S_MOV.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-M5.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-M5_MOV.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-Pro3.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-S10.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-S20.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-S20_MOV.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-T3.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-T4.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-T5.h"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\X-T5_MOV.h"; DestDir: "{app}"; Flags: ignoreversion 
+
+; ReadMe file (Assuming it's in the Fuji project folder, NOT the build output)
 Source: "{#SourceRoot}\Fuji\ReadMe.htm"; DestDir: "{app}"; Flags: isreadme
 
 ; Installer Resources needed for the setup UI itself (copy these from ASCOM SDK to InstallerResources folder first)
@@ -89,11 +160,10 @@ Filename: "{app}\ASCOM.ScdouglasFujifilm.exe"; Parameters: "/register"; Flags: r
 ; --- Uninstall Run Section ---
 ; Unregister the ASCOM local server driver during uninstallation
 [UninstallRun]
-Filename: "{app}\ASCOM.ScdouglasFujifilm.exe"; Parameters: "/unregister"; Flags: runhidden waituntilterminated
+Filename: "{app}\ASCOM.ScdouglasFujifilm.exe"; Parameters: "/unregister"; Flags: runhidden waituntilterminated; RunOnceId: "UnregisterFujicomDriver"
 
 ; --- Code Section ---
 ; Standard ASCOM Platform version check and Uninstall Previous Version logic
-; No changes needed here from the generated script unless you have specific needs.
 [Code]
 const
     REQUIRED_PLATFORM_VERSION = 6.2;    // Set this to the minimum required ASCOM Platform version
