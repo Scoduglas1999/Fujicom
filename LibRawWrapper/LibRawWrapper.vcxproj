@@ -129,10 +129,11 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <WarningLevel>Level3</WarningLevel>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4-Win64\LibRaw-0.21.4\lib;$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4-Win64\LibRaw-0.21.4\libraw;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>libraw.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(SolutionDir)Dependencies\LibRaw-0.21.4\lib\$(Platform)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)LibRawWrapper\Dependencies\LibRaw-0.21.4\lib\$(Platform)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
