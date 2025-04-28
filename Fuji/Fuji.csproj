@@ -64,7 +64,6 @@
   <PropertyGroup>
     <AssemblyOriginatorKeyFile>LocalServer.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
-
   <ItemGroup>
     <Reference Include="ASCOM.Astrometry, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" />
     <Reference Include="ASCOM.Attributes, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" />
@@ -80,7 +79,6 @@
     <Reference Include="System.Numerics" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
-
   <ItemGroup>
     <Compile Include="ClassFactory.cs" />
     <Compile Include="CameraDriver\CameraDriver.cs" />
@@ -113,16 +111,24 @@
       <SubType>Designer</SubType>
     </EmbeddedResource>
   </ItemGroup>
-
   <ItemGroup>
     <Content Include="ASCOM.ico" />
     <Content Include="ASCOM.png" />
+    <Content Include="Dependencies\LibRaw-0.21.4\bin\libraw.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Dependencies\LibRaw-0.21.4\libraw\libraw.h" />
+    <Content Include="Dependencies\LibRaw-0.21.4\libraw\libraw_alloc.h" />
+    <Content Include="Dependencies\LibRaw-0.21.4\libraw\libraw_const.h" />
+    <Content Include="Dependencies\LibRaw-0.21.4\libraw\libraw_datastream.h" />
+    <Content Include="Dependencies\LibRaw-0.21.4\libraw\libraw_internal.h" />
+    <Content Include="Dependencies\LibRaw-0.21.4\libraw\libraw_types.h" />
+    <Content Include="Dependencies\LibRaw-0.21.4\libraw\libraw_version.h" />
+    <Content Include="Dependencies\LibRaw-0.21.4\lib\libraw.lib" />
     <Content Include="ReadMe.htm" />
-
     <Content Include="libraw.dll">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
-
     <Content Include="CameraConfigs\GFX100S.json">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
@@ -132,7 +138,6 @@
     <Content Include="CameraConfigs\X-T5.json">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
-
     <Content Include="RequiredDLL\FF0016AP.dll">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
@@ -217,7 +222,6 @@
     <Content Include="RequiredDLL\libraw.lib">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
-
     <Content Include="RequiredHeaders\GFX50S.h">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
@@ -293,13 +297,18 @@
     <Content Include="RequiredHeaders\X-T5_MOV.h">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
+    <Content Include="Dependencies\LibRaw-0.21.4\bin\libraw.dll">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
-
   <ItemGroup>
     <None Include="app.config" />
+    <None Include="Dependencies\LibRaw-0.21.4\lib\libraw.exp" />
+    <None Include="Dependencies\LibRaw-0.21.4\lib\libraw.lib" />
+    <None Include="Dependencies\LibRaw-0.21.4\lib\libraw_static.lib" />
+    <None Include="Dependencies\LibRaw-0.21.4\lib\Makefile" />
     <None Include="LocalServer.snk" />
   </ItemGroup>
-
   <ItemGroup>
     <BootstrapperPackage Include="Microsoft.Net.Client.3.5">
       <Visible>False</Visible>
@@ -317,7 +326,6 @@
       <Install>true</Install>
     </BootstrapperPackage>
   </ItemGroup>
-
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json">
       <Version>13.0.3</Version>
@@ -341,17 +349,13 @@
       <Version>9.0.4</Version>
     </PackageReference>
   </ItemGroup>
-
   <ItemGroup>
-    <ProjectReference Include="..\..\LibRawWrapper\LibRawWrapper.vcxproj">
+    <ProjectReference Include="..\LibRawWrapper\LibRawWrapper.vcxproj">
       <Project>{58d228ec-9d14-8bc4-e744-26575477b5a0}</Project>
       <Name>LibRawWrapper</Name>
     </ProjectReference>
   </ItemGroup>
-
-  <ItemGroup />
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
-
   <Target Name="CopyRequiredFiles" AfterTargets="Build">
     <ItemGroup>
       <_SourceDlls Include="$(MSBuildProjectDirectory)\RequiredDLL\*.*" />
@@ -368,9 +372,10 @@
     <Message Text="Custom Target: Copying files from CameraConfigs..." Importance="normal" />
     <Message Text="Custom Target: Copying root files..." Importance="normal" />
   </Target>
-
   <PropertyGroup>
-    <PreBuildEvent></PreBuildEvent>
-    <PostBuildEvent></PostBuildEvent>
+    <PreBuildEvent>
+    </PreBuildEvent>
+    <PostBuildEvent>
+    </PostBuildEvent>
   </PropertyGroup>
 </Project>

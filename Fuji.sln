@@ -5,7 +5,7 @@ VisualStudioVersion = 17.13.35919.96
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fuji", "Fuji\Fuji.csproj", "{C708E487-E3A9-4073-A545-294B88674225}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LibRawWrapper", "..\LibRawWrapper\LibRawWrapper.vcxproj", "{58D228EC-9D14-8BC4-E744-26575477B5A0}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LibRawWrapper", "LibRawWrapper\LibRawWrapper.vcxproj", "{58D228EC-9D14-8BC4-E744-26575477B5A0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

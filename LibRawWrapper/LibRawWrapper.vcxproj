@@ -74,18 +74,29 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <IncludePath>$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4\libraw;$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4\lib;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <IncludePath>$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4\libraw;$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4\lib;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IncludePath>$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4\libraw;$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4\lib;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4\libraw;$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4\lib;$(IncludePath)</IncludePath>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <WarningLevel>Level3</WarningLevel>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\scdou\Downloads\LibRaw-0.21.4-Win64\LibRaw-0.21.4\lib;C:\Users\scdou\Downloads\LibRaw-0.21.4-Win64\LibRaw-0.21.4\libraw;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4-Win64\LibRaw-0.21.4\lib;$(SolutionDir)Fuji\Dependencies\LibRaw-0.21.4-Win64\LibRaw-0.21.4\libraw;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>libraw.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\Users\scdou\Downloads\LibRaw-0.21.4-Win64\LibRaw-0.21.4\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(SolutionDir)LibRawWrapper\Dependencies\LibRaw-0.21.4\lib\$(Platform)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -96,7 +107,8 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies />
+      <AdditionalDependencies>libraw.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Dependencies\LibRaw-0.21.4\lib\$(Platform)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -107,7 +119,8 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies />
+      <AdditionalDependencies>libraw.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Dependencies\LibRaw-0.21.4\lib\$(Platform)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -118,10 +131,19 @@
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies />
+      <AdditionalDependencies>libraw.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Dependencies\LibRaw-0.21.4\lib\$(Platform)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Dependencies\LibRaw-0.21.4\libraw\libraw.h" />
+    <ClInclude Include="Dependencies\LibRaw-0.21.4\libraw\libraw_alloc.h" />
+    <ClInclude Include="Dependencies\LibRaw-0.21.4\libraw\libraw_const.h" />
+    <ClInclude Include="Dependencies\LibRaw-0.21.4\libraw\libraw_datastream.h" />
+    <ClInclude Include="Dependencies\LibRaw-0.21.4\libraw\libraw_internal.h" />
+    <ClInclude Include="Dependencies\LibRaw-0.21.4\libraw\libraw_types.h" />
+    <ClInclude Include="Dependencies\LibRaw-0.21.4\libraw\libraw_version.h" />
+    <ClInclude Include="Dependencies\LibRaw-0.21.4\lib\libraw.lib" />
     <ClInclude Include="LibRawWrapper.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="Resource.h" />
