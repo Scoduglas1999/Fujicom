@@ -1,0 +1,23 @@
+{
+  "ModelName": "X-T2",
+  "CameraXSize": 6000,
+  "CameraYSize": 4000,
+  "PixelSizeX": 3.93,
+  "PixelSizeY": 3.93,
+  "MaxAdu": 65535,
+  "DefaultMinSensitivity": 200,
+  "DefaultMaxSensitivity": 12800,
+  "DefaultMinExposure": 0.00003125,
+  "DefaultMaxExposure": 30.0,
+  "DefaultBulbCapable": true,
+  "SdkConstants": {
+    "FocusModeManual": 1,
+    "ImageQualityRaw": 1,
+    "ImageQualityFine": 2,
+    "ImageQualityNormal": 3,
+    "ImageQualityRawFine": 4,
+    "ImageQualityRawNormal": 5,
+    "ImageQualitySuperfine": 6,
+    "ImageQualityRawSuperfine": 7
+  }
+}
