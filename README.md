@@ -27,13 +27,14 @@ The limitation on models is not from me, Fujifilm only released header files for
 If in the future more headers are released for me to work with, I can revisit this but until then it would be pracitcally impossible. 
 
 **INSTALLATION**
-1. Download the whole repo to your local machine
-2. Open the project in visual studio
-3. Make sure visual studio is set to Debug and x64 in the top row
-4. Make sure the solution explorer shows 2 of 2 projects (Fuji and LibRawWrapper)
-5. Right click Solution 'Fuji' at the top of the solution explorer
-6. Click clean solution, wait for it to finish
-7. Click build solution, wait for it to finish
-8. Open cmd and cd to the Debug folder of the repo
-9. type ASCOM.ScdouglasFujifilm.exe /register
-10. Driver should now be good to go, so go ahead and test it 
+1. IMPORTANT: This driver will not function without the ASCOM platform installed, no ASCOM driver will. Make sure it's installed before beginning
+2. Download the whole repo to your local machine
+3. Open the project in visual studio
+4. Make sure visual studio is set to Debug and x64 in the top row
+5. Make sure the solution explorer shows 2 of 2 projects (Fuji and LibRawWrapper)
+6. Right click Solution 'Fuji' at the top of the solution explorer
+7. Click clean solution, wait for it to finish
+8. Click build solution, wait for it to finish
+9. Open cmd and cd to the Debug folder of the repo
+10. type ASCOM.ScdouglasFujifilm.exe /register
+11. Driver should now be good to go, so go ahead and test it 
