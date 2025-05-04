@@ -58,10 +58,23 @@ Name: "{commoncf}\ASCOM\Uninstall\Camera\{#MyAppName}"
 Source: "{#BuildOutputPath}\ASCOM.ScdouglasFujifilm.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildOutputPath}\ASCOM.ScdouglasFujifilm.exe.config"; DestDir: "{app}"; Flags: ignoreversion
 
+; ASCOM specific files
+Source: "{#BuildOutputPath}\ASCOM.Astrometry.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\ASCOM.Attributes.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\ASCOM.Controls.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\ASCOM.DeviceInterfaces.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\ASCOM.Exceptions.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\ASCOM.Internal.Extensions.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\ASCOM.SettingsProvider.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\ASCOM.Utilities.dll"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#BuildOutputPath}\ASCOM.Utilities.Video.dll"; DestDir: "{app}"; Flags: ignoreversion
+
 ; LibRaw Wrapper and native DLL
 Source: "{#BuildOutputPath}\LibRawWrapper.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildOutputPath}\libraw.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#BuildOutputPath}\Sdcb.LibRaw.dll"; DestDir: "{app}"; Flags: ignoreversion ;
+
+
 
 ; Fujifilm Specific DLLs (Verify redistribution rights)
 Source: "{#BuildOutputPath}\XAPI.dll"; DestDir: "{app}"; Flags: ignoreversion 
@@ -100,6 +113,8 @@ Source: "{#BuildOutputPath}\System.Threading.Tasks.Extensions.dll"; DestDir: "{a
 Source: "{#BuildOutputPath}\Microsoft.Bcl.AsyncInterfaces.dll"; DestDir: "{app}"; Flags: ignoreversion 
 ; *** ADDED MISSING DEPENDENCY ***
 Source: "{#BuildOutputPath}\System.Numerics.Vectors.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\System.ValueTuple.dll"; DestDir: "{app}"; Flags: ignoreversion 
+Source: "{#BuildOutputPath}\System.IO.Pipelines.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 ; JSON Configuration/Data Files (Assuming these are needed at runtime)
 Source: "{#BuildOutputPath}\GFX50R.json"; DestDir: "{app}"; Flags: ignoreversion 
