@@ -52,7 +52,7 @@ Camera support is limited by the official Fujifilm X SDK. The following models a
 ## Installation (Recommended)
 
 1.  **Install ASCOM Platform:** If you haven't already, download and install the latest ASCOM Platform from [ascom-standards.org](https://ascom-standards.org/). This driver **will not function** without it.
-2.  **Download Driver Installer:** Go to the [Releases](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/releases) page of this repository and download the latest `.exe` installer file (e.g., `ScdouglasFujifilmASCOMSetup_vX.Y.Z.exe`).
+2.  **Download Driver Installer:** Go to the [Releases](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME/releases) page of this repository and download the latest `.exe` installer file (e.g., `Fujicom.Setup.V2.0.exe`).
 3.  **Run Installer:** Run the downloaded `.exe` file and follow the installation prompts. It will register the driver with the ASCOM Platform.
 4.  **Connect Camera:** Connect your supported Fujifilm camera to your computer via USB and set the camera's connection mode (usually under `CONNECTION SETTING` > `PC CONNECTION MODE` or similar) to `USB TETHER SHOOTING AUTO` or `USB AUTO`. Consult your camera manual for the exact menu path.
 5.  **Select in Software:** Open your ASCOM-compatible software (e.g., NINA) and select "Scdouglas Fujifilm Camera" (or similar name) from the camera dropdown list.
