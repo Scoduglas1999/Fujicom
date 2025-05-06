@@ -39,7 +39,7 @@ Camera support is limited by the official Fujifilm X SDK. The following models a
 * X-H2S
 * X-M5
 * X-Pro3
-* X-S10 (Requires Firmware v2.00+)
+* X-S10
 * X-S20
 * X-T3
 * X-T4
