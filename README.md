@@ -12,7 +12,7 @@ This driver utilizes the official **Fujifilm X SDK** for camera communication an
 ## Features
 
 * **ASCOM ICameraV3 Compliance:** Implements the standard ASCOM interface for broad compatibility.
-* **Exposure Control:** Start exposures, including long BULB exposures.
+* **Exposure Control:** Complete shutter control as you would expect in both mechanical and electronic, from timed mode to bulb. 
 * **ISO Control:** Get and set camera ISO sensitivity.
 * **RAW Image Download:** Retrieves the raw Bayer data from the camera's .RAF file using LibRaw, providing it as an `int[,]` array via the `ImageArray` property for direct use by imaging software.
 * **Dynamic Camera Configuration:** Loads camera-specific parameters (sensor size, pixel size, supported modes) from model-specific JSON files at connection time.
