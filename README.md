@@ -16,7 +16,7 @@ This driver utilizes the official **Fujifilm X SDK** for camera communication an
 * **ISO Control:** Get and set camera ISO sensitivity.
 * **RAW Image Download:** Retrieves the raw Bayer data from the camera's .RAF file using LibRaw, providing it as an `int[,]` array via the `ImageArray` property for direct use by imaging software.
 * **Dynamic Camera Configuration:** Loads camera-specific parameters (sensor size, pixel size, supported modes) from model-specific JSON files at connection time.
-* **Save Copy to SD Card:** Optional feature (configurable in ASCOM setup) to save a native `.RAF` file directly to the camera's SD card simultaneously with the data transfer to the computer. Useful for backups or separate processing.
+* **Save Copy to SD Card:** Optional feature (configurable in ASCOM setup) to save a native `.RAF` file directly to the camera's SD card simultaneously with the data transfer to the computer. Useful for use in software that require the Fuji files to be debayered at some stage in processing (most software won't recognize the NINA saved files as Fuji files, and thus won't debayer them properly, GFX files can simply have a manual bayer pattern selected). 
 * **ASCOM Profile Settings:** Standard ASCOM setup dialog for persistent settings like Trace Logging and the "Save Copy to SD Card" option.
 
 ## Supported Cameras
