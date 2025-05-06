@@ -116,4 +116,4 @@ Contributions are welcome! Please feel free to submit Pull Requests or report Is
 
 ## License
 
-This project is licensed under the [Your License Name] License - see the LICENSE.md file for details.
+This project is licensed under the MIT License - see the LICENSE.md file for details.
