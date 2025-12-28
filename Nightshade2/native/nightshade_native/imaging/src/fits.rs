@@ -1002,14 +1002,23 @@ pub fn validate_image_comprehensive(
         if !pixels.is_empty() {
             let total_pixels = pixels.len();
 
-            // Calculate statistics
-            let min_value = pixels.iter().copied().min().unwrap_or(0);
-            let max_value = pixels.iter().copied().max().unwrap_or(0);
-            let sum: u64 = pixels.iter().map(|&v| v as u64).sum();
-            let mean_value = sum / total_pixels as u64;
-
-            // Count saturated pixels
-            let saturated_count = pixels.iter().filter(|&&p| p >= options.saturation_threshold).count();
+            // Calculate statistics in a single pass for efficiency
+            let (min_value, max_value, sum, saturated_count) = pixels.iter().fold(
+                (u16::MAX, u16::MIN, 0u64, 0usize),
+                |(min, max, sum, sat_count), &pixel| {
+                    (
+                        min.min(pixel),
+                        max.max(pixel),
+                        sum + pixel as u64,
+                        sat_count + (pixel >= options.saturation_threshold) as usize,
+                    )
+                },
+            );
+            let mean_value = if total_pixels > 0 {
+                sum / total_pixels as u64
+            } else {
+                0
+            };
             let saturation_percent = saturated_count as f64 / total_pixels as f64;
 
             // Log statistics for debugging
@@ -1047,26 +1056,29 @@ pub fn validate_image_comprehensive(
                 tracing::error!("[IMAGE_VALIDATION] REJECTED: All-zero image");
             }
 
-            // Check 3: Severely underexposed (max value too low)
-            // This catches images where no meaningful signal was recorded
+            // Check 3: Underexposure detection with tiered thresholds
+            // Severe underexposure (max < min_max_value, default 100) - error
+            // Moderate underexposure (max < min_max_value * 5, default 500) - warning
+            let moderate_threshold = options.min_max_value.saturating_mul(5);
             if max_value < options.min_max_value && !all_zero && !options.is_bias_frame {
                 validation.add_error(format!(
-                    "Image severely underexposed: max pixel value {} is below minimum threshold {} - possible shutter/connection issue",
+                    "Image severely underexposed: max pixel value {} is below minimum threshold {} - \
+                    increase exposure time or check camera connection/shutter",
                     max_value, options.min_max_value
                 ));
                 tracing::error!(
                     "[IMAGE_VALIDATION] REJECTED: Severely underexposed (max={} < {})",
                     max_value, options.min_max_value
                 );
-            } else if max_value < options.min_max_value && !options.is_bias_frame {
-                // Just a warning for very low but not zero
+            } else if max_value < moderate_threshold && !all_zero && !options.is_bias_frame {
+                // Moderate underexposure - useful signal but concerning
                 validation.add_warning(format!(
-                    "Very low signal detected (max value: {})",
+                    "Low signal detected (max value: {}) - consider increasing exposure time",
                     max_value
                 ));
                 tracing::warn!(
-                    "[IMAGE_VALIDATION] WARNING: Very low signal (max={})",
-                    max_value
+                    "[IMAGE_VALIDATION] WARNING: Low signal (max={} < {})",
+                    max_value, moderate_threshold
                 );
             }
 
@@ -1074,7 +1086,8 @@ pub fn validate_image_comprehensive(
             // This indicates severe overexposure or gain/exposure misconfiguration
             if saturation_percent > options.max_saturation_percent {
                 validation.add_warning(format!(
-                    "Excessive saturation: {:.1}% of pixels are saturated (>{}%) - image may be overexposed",
+                    "Excessive saturation: {:.1}% of pixels are saturated (>{}%) - \
+                    reduce exposure time or gain",
                     saturation_percent * 100.0,
                     options.max_saturation_percent * 100.0
                 ));
@@ -1089,7 +1102,8 @@ pub fn validate_image_comprehensive(
             let all_saturated = min_value >= options.saturation_threshold;
             if all_saturated {
                 validation.add_error(format!(
-                    "Image is completely saturated (min value {} >= {}) - severely overexposed or sensor issue",
+                    "Image is completely saturated (min value {} >= {}) - \
+                    significantly reduce exposure time or gain",
                     min_value, options.saturation_threshold
                 ));
                 tracing::error!(
