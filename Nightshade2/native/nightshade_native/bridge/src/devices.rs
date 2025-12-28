@@ -3768,6 +3768,19 @@ impl DeviceManager {
                 }
                 Err(format!("Alpaca dome {} not found", device_id))
             }
+            Some(DriverType::Ascom) => {
+                #[cfg(windows)]
+                {
+                    let domes = self.ascom_domes.read().await;
+                    if let Some(dome) = domes.get(device_id) {
+                        let dome_guard = dome.read().await;
+                        return dome_guard.open_shutter().await.map_err(|e| e.to_string());
+                    }
+                    Err(format!("ASCOM dome {} not found", device_id))
+                }
+                #[cfg(not(windows))]
+                Err("ASCOM not supported on this platform".to_string())
+            }
             Some(DriverType::Indi) => {
                 let parts: Vec<&str> = device_id.split(':').collect();
                 if parts.len() < 4 {
@@ -3808,6 +3821,19 @@ impl DeviceManager {
                     return dome.close_shutter().await;
                 }
                 Err(format!("Alpaca dome {} not found", device_id))
+            }
+            Some(DriverType::Ascom) => {
+                #[cfg(windows)]
+                {
+                    let domes = self.ascom_domes.read().await;
+                    if let Some(dome) = domes.get(device_id) {
+                        let dome_guard = dome.read().await;
+                        return dome_guard.close_shutter().await.map_err(|e| e.to_string());
+                    }
+                    Err(format!("ASCOM dome {} not found", device_id))
+                }
+                #[cfg(not(windows))]
+                Err("ASCOM not supported on this platform".to_string())
             }
             Some(DriverType::Indi) => {
                 let parts: Vec<&str> = device_id.split(':').collect();
@@ -3935,6 +3961,19 @@ impl DeviceManager {
                 }
                 Err(format!("Alpaca dome {} not found", device_id))
             }
+            Some(DriverType::Ascom) => {
+                #[cfg(windows)]
+                {
+                    let domes = self.ascom_domes.read().await;
+                    if let Some(dome) = domes.get(device_id) {
+                        let dome_guard = dome.read().await;
+                        return dome_guard.shutter_status().await;
+                    }
+                    Err(format!("ASCOM dome {} not found", device_id))
+                }
+                #[cfg(not(windows))]
+                Err("ASCOM not supported on this platform".to_string())
+            }
             Some(DriverType::Indi) => {
                 let parts: Vec<&str> = device_id.split(':').collect();
                 if parts.len() < 4 {
@@ -3991,6 +4030,19 @@ impl DeviceManager {
                 }
                 Err(format!("Alpaca dome {} not found", device_id))
             }
+            Some(DriverType::Ascom) => {
+                #[cfg(windows)]
+                {
+                    let domes = self.ascom_domes.read().await;
+                    if let Some(dome) = domes.get(device_id) {
+                        let dome_guard = dome.read().await;
+                        return dome_guard.park().await.map_err(|e| e.to_string());
+                    }
+                    Err(format!("ASCOM dome {} not found", device_id))
+                }
+                #[cfg(not(windows))]
+                Err("ASCOM not supported on this platform".to_string())
+            }
             Some(DriverType::Indi) => {
                 let parts: Vec<&str> = device_id.split(':').collect();
                 if parts.len() < 4 {
@@ -4031,6 +4083,19 @@ impl DeviceManager {
                     return dome.slewing().await;
                 }
                 Err(format!("Alpaca dome {} not found", device_id))
+            }
+            Some(DriverType::Ascom) => {
+                #[cfg(windows)]
+                {
+                    let domes = self.ascom_domes.read().await;
+                    if let Some(dome) = domes.get(device_id) {
+                        let dome_guard = dome.read().await;
+                        return dome_guard.slewing().await.map_err(|e| e.to_string());
+                    }
+                    Err(format!("ASCOM dome {} not found", device_id))
+                }
+                #[cfg(not(windows))]
+                Err("ASCOM not supported on this platform".to_string())
             }
             Some(DriverType::Native) => {
                 let native_domes = self.native_domes.read().await;

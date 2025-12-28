@@ -727,185 +727,41 @@ impl DeviceOps for BridgeDeviceOps {
     async fn dome_open(&self, dome_id: &str) -> DeviceResult<()> {
         tracing::info!("Opening dome shutter {}", dome_id);
 
-        #[cfg(windows)]
-        {
-            if dome_id.starts_with("ascom:") {
-                let prog_id = dome_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-
-                return tokio::task::spawn_blocking(move || {
-                    nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
-                    let result = (|| {
-                        let dome = nightshade_ascom::AscomDome::new(&prog_id)?;
-                        dome.open_shutter()?;
-                        Ok(())
-                    })();
-                    nightshade_ascom::uninit_com();
-                    result
-                }).await.map_err(|e| format!("Task join error: {}", e))?;
-            }
-        }
-
-        if dome_id.starts_with("alpaca:") {
-            let id_str = dome_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let dome = nightshade_alpaca::AlpacaDome::from_server(&base_url, device_num);
-                dome.connect().await?;
-                dome.open_shutter().await?;
-                dome.disconnect().await.ok();
-                return Ok(());
-            }
-        }
-
-        Err(format!("Dome {} not found or unsupported", dome_id))
+        get_device_manager().dome_open_shutter(dome_id)
+            .await
+            .map_err(|e| format!("Open dome shutter failed: {}", e))
     }
 
     async fn dome_close(&self, dome_id: &str) -> DeviceResult<()> {
         tracing::info!("Closing dome shutter {}", dome_id);
 
-        #[cfg(windows)]
-        {
-            if dome_id.starts_with("ascom:") {
-                let prog_id = dome_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-
-                return tokio::task::spawn_blocking(move || {
-                    nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
-                    let result = (|| {
-                        let dome = nightshade_ascom::AscomDome::new(&prog_id)?;
-                        dome.close_shutter()?;
-                        Ok(())
-                    })();
-                    nightshade_ascom::uninit_com();
-                    result
-                }).await.map_err(|e| format!("Task join error: {}", e))?;
-            }
-        }
-
-        if dome_id.starts_with("alpaca:") {
-            let id_str = dome_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let dome = nightshade_alpaca::AlpacaDome::from_server(&base_url, device_num);
-                dome.connect().await?;
-                dome.close_shutter().await?;
-                dome.disconnect().await.ok();
-                return Ok(());
-            }
-        }
-
-        Err(format!("Dome {} not found or unsupported", dome_id))
+        get_device_manager().dome_close_shutter(dome_id)
+            .await
+            .map_err(|e| format!("Close dome shutter failed: {}", e))
     }
 
     async fn dome_park(&self, dome_id: &str) -> DeviceResult<()> {
         tracing::info!("Parking dome {}", dome_id);
 
-        #[cfg(windows)]
-        {
-            if dome_id.starts_with("ascom:") {
-                let prog_id = dome_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-
-                return tokio::task::spawn_blocking(move || {
-                    nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
-                    let result = (|| {
-                        let dome = nightshade_ascom::AscomDome::new(&prog_id)?;
-                        dome.park()?;
-                        Ok(())
-                    })();
-                    nightshade_ascom::uninit_com();
-                    result
-                }).await.map_err(|e| format!("Task join error: {}", e))?;
-            }
-        }
-
-        if dome_id.starts_with("alpaca:") {
-            let id_str = dome_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let dome = nightshade_alpaca::AlpacaDome::from_server(&base_url, device_num);
-                dome.connect().await?;
-                dome.park().await?;
-                dome.disconnect().await.ok();
-                return Ok(());
-            }
-        }
-
-        Err(format!("Dome {} not found or unsupported", dome_id))
+        get_device_manager().dome_park(dome_id)
+            .await
+            .map_err(|e| format!("Park dome failed: {}", e))
     }
 
     async fn dome_get_shutter_status(&self, dome_id: &str) -> DeviceResult<String> {
-        #[cfg(windows)]
-        {
-            if dome_id.starts_with("ascom:") {
-                let prog_id = dome_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+        let status = get_device_manager().dome_get_shutter_status(dome_id)
+            .await
+            .map_err(|e| format!("Get dome shutter status failed: {}", e))?;
 
-                return tokio::task::spawn_blocking(move || {
-                    nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
-                    let result = (|| {
-                        let dome = nightshade_ascom::AscomDome::new(&prog_id)?;
-                        let status = dome.shutter_status()?;
-                        // ASCOM ShutterStatus: 0=Open, 1=Closed, 2=Opening, 3=Closing, 4=Error
-                        Ok(match status {
-                            0 => "Open".to_string(),
-                            1 => "Closed".to_string(),
-                            2 => "Opening".to_string(),
-                            3 => "Closing".to_string(),
-                            _ => "Error".to_string(),
-                        })
-                    })();
-                    nightshade_ascom::uninit_com();
-                    result
-                }).await.map_err(|e| format!("Task join error: {}", e))?;
-            }
-        }
-
-        if dome_id.starts_with("alpaca:") {
-            let id_str = dome_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let dome = nightshade_alpaca::AlpacaDome::from_server(&base_url, device_num);
-                dome.connect().await?;
-                let status = dome.shutter_status().await?;
-                dome.disconnect().await.ok();
-
-                return Ok(match status {
-                    nightshade_alpaca::ShutterStatus::Open => "Open".to_string(),
-                    nightshade_alpaca::ShutterStatus::Closed => "Closed".to_string(),
-                    nightshade_alpaca::ShutterStatus::Opening => "Opening".to_string(),
-                    nightshade_alpaca::ShutterStatus::Closing => "Closing".to_string(),
-                    nightshade_alpaca::ShutterStatus::Error => "Error".to_string(),
-                });
-            }
-        }
-
-        Err(format!("Dome {} not found or unsupported", dome_id))
+        // Convert i32 status to string
+        // ASCOM ShutterStatus: 0=Open, 1=Closed, 2=Opening, 3=Closing, 4=Error
+        Ok(match status {
+            0 => "Open".to_string(),
+            1 => "Closed".to_string(),
+            2 => "Opening".to_string(),
+            3 => "Closing".to_string(),
+            _ => "Error".to_string(),
+        })
     }
     
     // =========================================================================
