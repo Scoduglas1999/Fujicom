@@ -1,0 +1,421 @@
+=============================================================================
+WBP_EnvironmentSelector - Blueprint Implementation Example
+=============================================================================
+
+This file provides pseudo-code for implementing the Environment Selector
+widget in Unreal Engine Blueprint. Use this as a guide when creating your
+Blueprint widget.
+
+=============================================================================
+WIDGET SETUP
+=============================================================================
+
+1. Create New Widget Blueprint
+   - Name: WBP_EnvironmentSelector
+   - Parent Class: JellyfinEnvironmentSelector (C++ class)
+   - Location: /Game/UI/Widgets/
+
+2. Designer Hierarchy
+   ├── Canvas Panel (Root)
+       ├── Overlay (MainContainer)
+           ├── Vertical Box (ContentPanel)
+           │   ├── Text Block (TitleText) → "Select Environment"
+           │   ├── Scroll Box (EnvironmentGrid)
+           │   │   └── (Dynamically populated with WBP_EnvironmentCard)
+           │   └── Button (CloseButton) → "Close"
+           ├── Overlay (LoadingOverlay) → Visibility: Collapsed
+           │   ├── Image (DimBackground) → Color: Black, Opacity: 0.7
+           │   └── Vertical Box
+           │       ├── Throbber (LoadingSpinner)
+           │       └── Text Block (LoadingText) → "Loading..."
+           └── Overlay (ErrorOverlay) → Visibility: Collapsed
+               ├── Image (DimBackground)
+               └── Vertical Box (ErrorDialog)
+                   ├── Text Block (ErrorTitle) → "Error"
+                   ├── Text Block (ErrorMessage) → Bind to variable
+                   └── Button (ErrorOKButton) → "OK"
+
+=============================================================================
+VARIABLES
+=============================================================================
+
+// Widget References
+CardWidgetClass: WidgetClass (WBP_EnvironmentCard) → EditAnywhere
+EnvironmentCards: Array of WBP_EnvironmentCard → (runtime array)
+
+// State
+CurrentErrorMessage: String → (stores error for display)
+IsLoading: Boolean → (tracks loading state)
+
+=============================================================================
+EVENT GRAPH - CORE EVENTS
+=============================================================================
+
+─────────────────────────────────────────────────────────────────────────
+Event: OnEnvironmentsReady (Override from C++)
+─────────────────────────────────────────────────────────────────────────
+Input: Environments (Array of FJellyfinEnvironmentDisplayInfo)
+
+Blueprint Graph:
+┌──────────────────────────────────────────────┐
+│ Event OnEnvironmentsReady                    │
+└──────────────────────────────────────────────┘
+    │
+    ├──> Clear Environment Grid
+    │    └─> EnvironmentGrid → Clear Children
+    │
+    ├──> Hide Loading
+    │    └─> LoadingOverlay → Set Visibility (Collapsed)
+    │
+    └──> ForEachLoop (Environments)
+         │
+         ├──> Create Widget
+         │    ├─ Class: CardWidgetClass
+         │    └─ Owning Player: Get Owning Player
+         │
+         ├──> Cast to WBP_EnvironmentCard
+         │    │
+         │    └──> Initialize Card
+         │         ├─ Set Environment ID (Loop Element.EnvironmentId)
+         │         ├─ Set Display Name (Loop Element.DisplayName)
+         │         ├─ Set Description (Loop Element.Description)
+         │         ├─ Set Preview Image (Loop Element.PreviewImage)
+         │         ├─ Set Is Current (Loop Element.bIsCurrent)
+         │         └─ Bind OnCardClicked → HandleCardClicked
+         │
+         ├──> Add to Grid
+         │    └─ EnvironmentGrid → Add Child (CreatedWidget)
+         │
+         └──> Store Reference
+              └─ EnvironmentCards → Add (CreatedWidget)
+
+─────────────────────────────────────────────────────────────────────────
+Event: OnEnvironmentChanging (Override from C++)
+─────────────────────────────────────────────────────────────────────────
+Input: FromEnvironment (String), ToEnvironment (String)
+
+Blueprint Graph:
+┌──────────────────────────────────────────────┐
+│ Event OnEnvironmentChanging                  │
+└──────────────────────────────────────────────┘
+    │
+    ├──> Show Loading
+    │    └─> LoadingOverlay → Set Visibility (Visible)
+    │
+    ├──> Update Loading Text
+    │    └─> LoadingText → Set Text
+    │        └─ Format Text: "Loading {ToEnvironment}..."
+    │
+    └──> Disable Card Interaction
+         └─> ForEachLoop (EnvironmentCards)
+             └─> Set Is Enabled (false)
+
+─────────────────────────────────────────────────────────────────────────
+Event: OnEnvironmentLoaded (Override from C++)
+─────────────────────────────────────────────────────────────────────────
+Input: EnvironmentId (String), DisplayName (String)
+
+Blueprint Graph:
+┌──────────────────────────────────────────────┐
+│ Event OnEnvironmentLoaded                    │
+└──────────────────────────────────────────────┘
+    │
+    ├──> Hide Loading
+    │    └─> LoadingOverlay → Set Visibility (Collapsed)
+    │
+    ├──> Optional: Show Success Message
+    │    └─> Print String: "Loaded {DisplayName}"
+    │
+    └──> Close Selector
+         └─> Remove from Parent (self)
+
+─────────────────────────────────────────────────────────────────────────
+Event: OnEnvironmentLoadFailed (Override from C++)
+─────────────────────────────────────────────────────────────────────────
+Input: EnvironmentId (String), ErrorMessage (String)
+
+Blueprint Graph:
+┌──────────────────────────────────────────────┐
+│ Event OnEnvironmentLoadFailed                │
+└──────────────────────────────────────────────┘
+    │
+    ├──> Hide Loading
+    │    └─> LoadingOverlay → Set Visibility (Collapsed)
+    │
+    ├──> Store Error
+    │    └─> CurrentErrorMessage = ErrorMessage
+    │
+    ├──> Show Error Dialog
+    │    ├─> ErrorOverlay → Set Visibility (Visible)
+    │    └─> ErrorMessage → Set Text (ErrorMessage)
+    │
+    └──> Re-enable Cards
+         └─> ForEachLoop (EnvironmentCards)
+             └─> Set Is Enabled (true)
+
+=============================================================================
+EVENT GRAPH - UI EVENTS
+=============================================================================
+
+─────────────────────────────────────────────────────────────────────────
+Event: HandleCardClicked (Custom Event)
+─────────────────────────────────────────────────────────────────────────
+Input: EnvironmentId (String)
+
+Blueprint Graph:
+┌──────────────────────────────────────────────┐
+│ HandleCardClicked                            │
+└──────────────────────────────────────────────┘
+    │
+    └──> Call SelectEnvironment (C++ function)
+         └─ EnvironmentId: Input EnvironmentId
+
+─────────────────────────────────────────────────────────────────────────
+Event: CloseButton → OnClicked
+─────────────────────────────────────────────────────────────────────────
+
+Blueprint Graph:
+┌──────────────────────────────────────────────┐
+│ OnClicked (CloseButton)                      │
+└──────────────────────────────────────────────┘
+    │
+    └──> Remove from Parent (self)
+
+─────────────────────────────────────────────────────────────────────────
+Event: ErrorOKButton → OnClicked
+─────────────────────────────────────────────────────────────────────────
+
+Blueprint Graph:
+┌──────────────────────────────────────────────┐
+│ OnClicked (ErrorOKButton)                    │
+└──────────────────────────────────────────────┘
+    │
+    ├──> Hide Error Dialog
+    │    └─> ErrorOverlay → Set Visibility (Collapsed)
+    │
+    └──> Clear Error
+         └─> CurrentErrorMessage = ""
+
+=============================================================================
+WBP_EnvironmentCard - CHILD WIDGET IMPLEMENTATION
+=============================================================================
+
+1. Create New Widget Blueprint
+   - Name: WBP_EnvironmentCard
+   - Parent Class: UserWidget
+   - Location: /Game/UI/Widgets/
+
+2. Designer Hierarchy
+   ├── Button (CardButton) → Style: Transparent with hover
+       └── Overlay
+           ├── Image (PreviewImage) → Size: 256x256
+           ├── Overlay (CurrentBadge) → Visibility: Collapsed
+           │   ├── Image (BadgeBackground) → Color: Green
+           │   └── Text Block → "CURRENT"
+           └── Vertical Box (InfoPanel)
+               ├── Text Block (DisplayNameText) → Font: Bold, Size: 18
+               └── Text Block (DescriptionText) → Font: Regular, Size: 12
+
+3. Variables
+   EnvironmentId: String → (public)
+   DisplayName: String → (public)
+   Description: String → (public)
+   PreviewImageTexture: Texture2D Object Reference → (public)
+   bIsCurrent: Boolean → (public)
+
+4. Event Dispatcher
+   OnCardClicked: Event Dispatcher (EnvironmentId: String)
+
+5. Functions
+
+   ─────────────────────────────────────────────────────────────────────
+   Function: InitializeCard
+   ─────────────────────────────────────────────────────────────────────
+   Inputs:
+     - InEnvironmentId: String
+     - InDisplayName: String
+     - InDescription: String
+     - InPreviewImage: Texture2D
+     - InIsCurrent: Boolean
+
+   Blueprint Graph:
+   ┌──────────────────────────────────────────────┐
+   │ InitializeCard                               │
+   └──────────────────────────────────────────────┘
+       │
+       ├──> Store Values
+       │    ├─ EnvironmentId = InEnvironmentId
+       │    ├─ DisplayName = InDisplayName
+       │    ├─ Description = InDescription
+       │    ├─ PreviewImageTexture = InPreviewImage
+       │    └─ bIsCurrent = InIsCurrent
+       │
+       ├──> Update UI
+       │    ├─ DisplayNameText → Set Text (InDisplayName)
+       │    ├─ DescriptionText → Set Text (InDescription)
+       │    └─ PreviewImage → Set Brush from Texture (InPreviewImage)
+       │
+       └──> Update Current Badge
+            └─ Branch (InIsCurrent)
+               ├─ True: CurrentBadge → Set Visibility (Visible)
+               └─ False: CurrentBadge → Set Visibility (Collapsed)
+
+   ─────────────────────────────────────────────────────────────────────
+   Event: CardButton → OnClicked
+   ─────────────────────────────────────────────────────────────────────
+
+   Blueprint Graph:
+   ┌──────────────────────────────────────────────┐
+   │ OnClicked (CardButton)                       │
+   └──────────────────────────────────────────────┘
+       │
+       └──> OnCardClicked (Event Dispatcher)
+            └─ Call with EnvironmentId
+
+=============================================================================
+USAGE EXAMPLE - Adding to Settings Menu
+=============================================================================
+
+In your WBP_Settings widget:
+
+─────────────────────────────────────────────────────────────────────────
+Event: ChangeEnvironmentButton → OnClicked
+─────────────────────────────────────────────────────────────────────────
+
+Blueprint Graph:
+┌──────────────────────────────────────────────┐
+│ OnClicked (ChangeEnvironmentButton)          │
+└──────────────────────────────────────────────┘
+    │
+    ├──> Create Widget
+    │    ├─ Class: WBP_EnvironmentSelector
+    │    └─ Owning Player: Get Owning Player
+    │
+    └──> Add to Viewport
+         └─ Z-Order: 999 (on top)
+
+=============================================================================
+USAGE EXAMPLE - Adding to VR Radial Menu
+=============================================================================
+
+In your VR menu system:
+
+─────────────────────────────────────────────────────────────────────────
+Event: OnRadialMenuOption_Environments
+─────────────────────────────────────────────────────────────────────────
+
+Blueprint Graph:
+┌──────────────────────────────────────────────┐
+│ OnRadialMenuOption_Environments              │
+└──────────────────────────────────────────────┘
+    │
+    ├──> Get Jellyfin Screen Actor
+    │    └─ Get Actor of Class (AJellyfinScreenActor)
+    │
+    ├──> Create Widget
+    │    ├─ Class: WBP_EnvironmentSelector
+    │    ├─ Owning Player: Get Player Controller
+    │    └─ Cast to UJellyfinEnvironmentSelector
+    │
+    ├──> Set Owning Screen
+    │    └─ Call SetOwningScreen (ScreenActor)
+    │
+    └──> Show on Screen Widget Component
+         └─ Add to screen's widget component
+
+=============================================================================
+STYLING RECOMMENDATIONS
+=============================================================================
+
+Colors:
+  - Primary: #1E88E5 (Blue)
+  - Secondary: #43A047 (Green)
+  - Accent: #FDD835 (Yellow/Gold)
+  - Background: #121212 (Dark Gray)
+  - Surface: #1E1E1E (Slightly lighter)
+  - Error: #E53935 (Red)
+
+Fonts:
+  - Title: Roboto Bold, 24pt
+  - Card Name: Roboto Medium, 18pt
+  - Description: Roboto Regular, 12pt
+  - Button: Roboto Medium, 14pt
+
+Spacing:
+  - Card Padding: 16px
+  - Card Spacing: 12px
+  - Grid Columns: 3 (desktop), 2 (mobile/VR)
+  - Border Radius: 8px
+
+Animations:
+  - Card Hover: Scale 1.05, Duration 0.2s
+  - Loading Fade: Opacity 0→1, Duration 0.3s
+  - Error Shake: X offset ±5px, Duration 0.5s
+
+=============================================================================
+ACCESSIBILITY CONSIDERATIONS
+=============================================================================
+
+1. VR Interaction:
+   - Ensure cards are large enough for laser pointer selection
+   - Minimum card size: 256x256 units
+   - Add hover state with visual feedback
+   - Support both hand tracking and controller input
+
+2. Contrast:
+   - Text contrast ratio ≥ 4.5:1
+   - Use border/shadow to separate cards from background
+   - Preview images should have fallback solid color
+
+3. Feedback:
+   - Audio feedback on card click
+   - Haptic feedback on selection (controllers)
+   - Clear loading indicators
+   - Error messages with retry options
+
+=============================================================================
+PERFORMANCE TIPS
+=============================================================================
+
+1. Card Pooling:
+   - For large environment lists, consider object pooling
+   - Reuse card widgets instead of destroying/creating
+
+2. Preview Loading:
+   - Show placeholder while preview loads
+   - Consider lower resolution previews on Quest
+
+3. Animation:
+   - Use material-based effects over Blueprint animations
+   - Limit simultaneous animations to 5-10 cards
+
+4. Memory:
+   - Unload selector widget when not in use
+   - Clear card references on close
+   - Release preview image references
+
+=============================================================================
+TESTING CHECKLIST
+=============================================================================
+
+[ ] Widget opens without errors
+[ ] Environment list populates correctly
+[ ] Platform filtering works (Quest vs PCVR)
+[ ] Card click selects environment
+[ ] Loading overlay shows during transition
+[ ] Level loads successfully
+[ ] Current environment indicator updates
+[ ] Error dialog appears on invalid selection
+[ ] Close button works
+[ ] Error OK button dismisses dialog
+[ ] Multiple selections don't cause issues
+[ ] Works with VR pointer interaction
+[ ] Works with hand tracking
+[ ] Preview images load correctly
+[ ] Cards display correct information
+[ ] Hover states work in VR
+[ ] Performance is smooth (60+ FPS)
+
+=============================================================================
+END OF EXAMPLE
+=============================================================================

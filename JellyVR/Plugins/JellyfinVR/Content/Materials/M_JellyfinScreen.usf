@@ -1,0 +1,116 @@
+// JellyVR Screen Material Shader
+// This file contains the material logic for the Jellyfin VR screen
+//
+// HOW TO USE IN UNREAL ENGINE:
+// 1. Create a new Material in Content Browser
+// 2. Name it "M_JellyfinScreen"
+// 3. Set Material Domain: Surface
+// 4. Set Blend Mode: Opaque
+// 5. Set Shading Model: Unlit (important for VR clarity)
+// 6. Add the nodes described below
+
+/*
+MATERIAL SETUP INSTRUCTIONS:
+
+=== PARAMETERS TO CREATE ===
+
+1. Texture Parameter: "VideoTexture"
+   - Connect to: Base Color (through processing below)
+
+2. Scalar Parameter: "ShowVideo"
+   - Default: 0
+   - Connect to: Lerp Alpha (switches between UI and video)
+
+3. Scalar Parameter: "Brightness"
+   - Default: 5.0
+   - Range: 1.0 - 20.0
+   - Multiplied with the output color for HDR
+
+4. Scalar Parameter: "Contrast"
+   - Default: 1.0
+   - Range: 0.5 - 2.0
+
+5. Scalar Parameter: "Saturation"
+   - Default: 1.0
+   - Range: 0.0 - 2.0
+
+6. Vector Parameter: "AmbientGlowColor"
+   - Default: (0.0, 0.65, 0.85, 1.0) - Jellyfin blue
+   - Used for edge glow effect
+
+7. Scalar Parameter: "AmbientGlowIntensity"
+   - Default: 1.0
+   - Range: 0.0 - 5.0
+
+=== NODE SETUP (paste this into Custom node or follow setup) ===
+
+// Main video processing
+float3 ProcessVideo(float3 VideoColor, float Brightness, float Contrast, float Saturation)
+{
+    // Apply contrast
+    float3 Contrasted = (VideoColor - 0.5) * Contrast + 0.5;
+
+    // Apply saturation
+    float Luminance = dot(Contrasted, float3(0.299, 0.587, 0.114));
+    float3 Saturated = lerp(Luminance, Contrasted, Saturation);
+
+    // Apply brightness for HDR
+    float3 Final = Saturated * Brightness;
+
+    return Final;
+}
+
+=== COMPLETE MATERIAL GRAPH ===
+
+1. VIDEO PATH:
+   [VideoTexture] -> [Sample Texture] -> [Custom: ProcessVideo] -> [Lerp A]
+
+2. UI PATH (when ShowVideo = 0):
+   [Constant3: 0.1, 0.1, 0.12] -> [Lerp B]
+
+3. MODE SWITCH:
+   [ShowVideo] -> [Lerp Alpha]
+
+4. OUTPUT:
+   [Lerp Result] -> [Emissive Color]
+
+5. AMBIENT GLOW (optional, for screen edge):
+   [ScreenPosition] -> [Calculate Edge Distance] -> [AmbientGlowColor * Intensity] -> [Add to Emissive]
+
+=== HDR10 SUPPORT ===
+
+For HDR10 content, the video texture will contain values > 1.0
+The Brightness parameter scales these appropriately for the VR display.
+Quest 3 supports HDR, so values will be tone-mapped by the device.
+
+=== RECOMMENDED MATERIAL SETTINGS ===
+
+- Allow Negative Emissive Color: Checked (for HDR)
+- Use Material Attributes: Unchecked
+- Two Sided: Unchecked
+- Fully Rough: Checked (no reflections needed)
+
+*/
+
+// Custom HLSL for video processing (use in Custom node)
+// Input: VideoColor (float3), Brightness (float), Contrast (float), Saturation (float)
+// Output: float3
+
+float3 VideoColor_Processed;
+
+// Tonemap for HDR (simple Reinhard)
+float3 Tonemapped = VideoColor / (1.0 + VideoColor);
+
+// Apply contrast centered at 0.5
+float3 Contrasted = (Tonemapped - 0.5) * Contrast + 0.5;
+
+// Calculate luminance for saturation
+float Luma = dot(Contrasted, float3(0.2126, 0.7152, 0.0722));
+
+// Apply saturation
+float3 Saturated = lerp(float3(Luma, Luma, Luma), Contrasted, Saturation);
+
+// Apply brightness multiplier
+VideoColor_Processed = Saturated * Brightness;
+
+return VideoColor_Processed;

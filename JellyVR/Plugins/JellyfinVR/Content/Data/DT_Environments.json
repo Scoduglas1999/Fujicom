@@ -1,0 +1,18 @@
+[
+  {
+    "Name": "DT_Environments",
+    "Description": "Environment selection data table for JellyVR. Import this as a Data Table with row structure FJellyfinEnvironmentInfo.",
+    "RowStructure": "FJellyfinEnvironmentInfo",
+    "Rows": [
+      {
+        "RowName": "TestRoom",
+        "LevelPath": "/Game/Environments/Environment_TestRoom",
+        "DisplayName": "Test Room",
+        "Description": "A simple test environment",
+        "PreviewImage": null,
+        "RequiresPCVR": false,
+        "SortOrder": 0
+      }
+    ]
+  }
+]
