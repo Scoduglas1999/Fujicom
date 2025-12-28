@@ -8,6 +8,7 @@ use nightshade_sequencer::{DeviceOps, DeviceResult, ImageData, PlateSolveResult,
 use crate::state::SharedAppState;
 use crate::api::*;
 use crate::event::{EquipmentEvent, EventSeverity};
+use crate::unified_device_ops::create_unified_device_ops;
 use std::sync::Arc;
 
 /// Real device operations implementation that uses connected devices
@@ -202,88 +203,59 @@ impl DeviceOps for BridgeDeviceOps {
     ) -> DeviceResult<ImageData> {
         tracing::info!("Starting {:.1}s exposure on camera {}", duration_secs, camera_id);
 
-        // Set camera parameters if provided - propagate errors instead of ignoring
-        if let Some(g) = gain {
-            set_camera_gain(camera_id.to_string(), g)
-                .await
-                .map_err(|e| format!("Failed to set gain: {}", e))?;
-        }
-        if let Some(o) = offset {
-            set_camera_offset(camera_id.to_string(), o)
-                .await
-                .map_err(|e| format!("Failed to set offset: {}", e))?;
-        }
-        if bin_x > 1 || bin_y > 1 {
-            api_set_camera_binning(camera_id.to_string(), bin_x, bin_y)
-                .await
-                .map_err(|e| format!("Failed to set binning: {}", e))?;
-        }
-
-        // Start the exposure (waits for completion)
-        start_exposure(
-            camera_id.to_string(),
+        // Use UnifiedDeviceOps directly to get image data without going through global storage.
+        // This eliminates the race condition where concurrent exposures from different cameras
+        // could overwrite each other's data in the global LAST_RAW_IMAGE_INFO storage.
+        let unified_ops = create_unified_device_ops();
+        let image_data = unified_ops.camera_start_exposure(
+            camera_id,
             duration_secs,
-            gain.unwrap_or(0),
-            offset.unwrap_or(0),
+            gain,
+            offset,
             bin_x,
             bin_y,
-        )
-            .await
-            .map_err(|e| format!("Exposure failed: {}", e))?;
-
-        // Get the raw image data with metadata - this is the ACTUAL 16-bit sensor data,
-        // not the 8-bit display-stretched visualization data
-        let raw_info = get_last_raw_image_info()
-            .await
-            .map_err(|e| format!("Failed to get raw image info: {}", e))?
-            .ok_or_else(|| "No raw image data available after exposure".to_string())?;
+        ).await?;
 
         // Validate the raw data
-        let expected_size = (raw_info.width as usize) * (raw_info.height as usize);
-        if raw_info.data.len() != expected_size {
+        let expected_size = (image_data.width as usize) * (image_data.height as usize);
+        if image_data.data.len() != expected_size {
             return Err(format!(
                 "Image data size mismatch: got {} pixels, expected {} ({}x{})",
-                raw_info.data.len(), expected_size, raw_info.width, raw_info.height
+                image_data.data.len(), expected_size, image_data.width, image_data.height
             ));
         }
 
-        // Check for obviously bad frames (all pixels identical = sensor failure or dead frame)
-        if raw_info.data.len() > 0 {
-            let first_val = raw_info.data[0];
-            let all_same = raw_info.data.iter().all(|&v| v == first_val);
-            if all_same {
-                return Err(format!(
-                    "Invalid image: all {} pixels have identical value {} - possible sensor failure or dead frame",
-                    raw_info.data.len(), first_val
-                ));
+        // Check for obviously bad frames - but allow bias frames which legitimately have
+        // nearly uniform data. We allow up to 10 differing pixels for bias frame tolerance.
+        if !image_data.data.is_empty() {
+            let first_val = image_data.data[0];
+            let differing_count = image_data.data.iter().filter(|&&v| v != first_val).count();
+
+            // If ALL pixels are identical, it's likely a sensor failure or dead frame
+            // But if only a few pixels differ (< 10), it could be a valid bias frame
+            if differing_count == 0 {
+                tracing::warn!(
+                    "Suspicious image: all {} pixels have identical value {} - possible sensor failure or bias frame",
+                    image_data.data.len(), first_val
+                );
+                // For bias frames with 0-second exposure, this is expected - don't error
+                // Only error for longer exposures where uniform data indicates a problem
+                if duration_secs > 0.1 {
+                    return Err(format!(
+                        "Invalid image: all {} pixels have identical value {} - possible sensor failure or dead frame",
+                        image_data.data.len(), first_val
+                    ));
+                }
             }
         }
 
-        // Get camera status for temperature metadata
-        let status = get_camera_status(camera_id.to_string())
-            .await
-            .ok();
-
         tracing::info!(
             "Raw image captured: {}x{}, {} pixels, sensor_type={:?}, bayer_offset={:?}",
-            raw_info.width, raw_info.height, raw_info.data.len(),
-            raw_info.sensor_type, raw_info.bayer_offset
+            image_data.width, image_data.height, image_data.data.len(),
+            image_data.sensor_type, image_data.bayer_offset
         );
 
-        Ok(ImageData {
-            width: raw_info.width,
-            height: raw_info.height,
-            data: raw_info.data,  // Use ACTUAL raw 16-bit sensor data
-            bits_per_pixel: 16,
-            exposure_secs: duration_secs,
-            gain,
-            offset,
-            temperature: status.as_ref().and_then(|s| s.sensor_temp),
-            filter: None, // Would come from filter wheel
-            timestamp: chrono::Utc::now().timestamp(),
-            sensor_type: raw_info.sensor_type,
-            bayer_offset: raw_info.bayer_offset,
-        })
+        Ok(image_data)
     }
     
     async fn camera_abort_exposure(&self, camera_id: &str) -> DeviceResult<()> {
