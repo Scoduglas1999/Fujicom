@@ -2778,6 +2778,13 @@ impl DeviceManager {
                 }
                 Err("Native focuser not connected".to_string())
             }
+            DriverType::Alpaca => {
+                let alpaca_focusers = self.alpaca_focusers.read().await;
+                if let Some(focuser) = alpaca_focusers.get(device_id) {
+                    return focuser.move_to(position).await;
+                }
+                Err("Alpaca focuser not connected".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -2806,6 +2813,16 @@ impl DeviceManager {
                     return focuser.move_relative(steps).await.map_err(|e| e.to_string());
                 }
                 Err("Native focuser not connected".to_string())
+            }
+            DriverType::Alpaca => {
+                // Alpaca focusers only support absolute positioning, so we compute target position
+                let alpaca_focusers = self.alpaca_focusers.read().await;
+                if let Some(focuser) = alpaca_focusers.get(device_id) {
+                    let current_position = focuser.position().await?;
+                    let target_position = current_position + steps;
+                    return focuser.move_to(target_position).await;
+                }
+                Err("Alpaca focuser not connected".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -2836,6 +2853,13 @@ impl DeviceManager {
                 }
                 Err("Native focuser not connected".to_string())
             }
+            DriverType::Alpaca => {
+                let alpaca_focusers = self.alpaca_focusers.read().await;
+                if let Some(focuser) = alpaca_focusers.get(device_id) {
+                    return focuser.halt().await;
+                }
+                Err("Alpaca focuser not connected".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -2863,6 +2887,13 @@ impl DeviceManager {
                     return focuser.get_position().await.map_err(|e| e.to_string());
                 }
                 Err("Native focuser not connected".to_string())
+            }
+            DriverType::Alpaca => {
+                let alpaca_focusers = self.alpaca_focusers.read().await;
+                if let Some(focuser) = alpaca_focusers.get(device_id) {
+                    return focuser.position().await;
+                }
+                Err("Alpaca focuser not connected".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -2893,21 +2924,11 @@ impl DeviceManager {
                 Err("Native focuser not connected".to_string())
             }
             DriverType::Alpaca => {
-                // Parse Alpaca device ID: alpaca:http://host:port:focuser:N
-                let id_str = device_id.strip_prefix("alpaca:").unwrap_or("");
-                let parts: Vec<&str> = id_str.split(':').collect();
-
-                if parts.len() >= 5 {
-                    let protocol = parts[0];
-                    let host_part = parts[1].trim_start_matches("//");
-                    let port = parts[2];
-                    let device_num: u32 = parts[4].parse().unwrap_or(0);
-
-                    let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                    let focuser = nightshade_alpaca::AlpacaFocuser::from_server(&base_url, device_num);
+                let alpaca_focusers = self.alpaca_focusers.read().await;
+                if let Some(focuser) = alpaca_focusers.get(device_id) {
                     return focuser.is_moving().await;
                 }
-                Err("Invalid Alpaca focuser ID".to_string())
+                Err("Alpaca focuser not connected".to_string())
             }
             DriverType::Indi => {
                 // Parse INDI device ID: indi:host:port:device_name
@@ -2955,6 +2976,14 @@ impl DeviceManager {
                 }
                 Err("Native focuser not connected".to_string())
             }
+            DriverType::Alpaca => {
+                let alpaca_focusers = self.alpaca_focusers.read().await;
+                if let Some(focuser) = alpaca_focusers.get(device_id) {
+                    // Alpaca temperature() returns f64, wrap in Some for consistency
+                    return focuser.temperature().await.map(Some);
+                }
+                Err("Alpaca focuser not connected".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -2982,6 +3011,15 @@ impl DeviceManager {
                     return Ok((focuser.get_max_position(), focuser.get_step_size()));
                 }
                 Err("Native focuser not connected".to_string())
+            }
+            DriverType::Alpaca => {
+                let alpaca_focusers = self.alpaca_focusers.read().await;
+                if let Some(focuser) = alpaca_focusers.get(device_id) {
+                    let max_step = focuser.max_step().await?;
+                    let step_size = focuser.step_size().await.unwrap_or(1.0);
+                    return Ok((max_step, step_size));
+                }
+                Err("Alpaca focuser not connected".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
