@@ -3369,6 +3369,30 @@ impl DeviceManager {
                 }
                 Err("Native filter wheel not connected".to_string())
             }
+            DriverType::Alpaca => {
+                let wheels = self.alpaca_filter_wheels.read().await;
+                if let Some(wheel) = wheels.get(device_id) {
+                    return wheel.set_position(position).await;
+                }
+                Err(format!("Alpaca filter wheel {} not found", device_id))
+            }
+            DriverType::Indi => {
+                // Parse INDI device ID: indi:host:port:device_name
+                let parts: Vec<&str> = device_id.split(':').collect();
+                if parts.len() < 4 {
+                    return Err("Invalid INDI device ID format".to_string());
+                }
+                let server_key = format!("{}:{}", parts[1], parts[2]);
+                let device_name = parts[3..].join(":");
+
+                let clients = self.indi_clients.read().await;
+                if let Some(client) = clients.get(&server_key) {
+                    let mut locked = client.write().await;
+                    // INDI filter slots are 1-based
+                    return locked.set_number(&device_name, "FILTER_SLOT", "FILTER_SLOT_VALUE", position as f64).await;
+                }
+                Err("INDI filter wheel not connected".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3397,6 +3421,33 @@ impl DeviceManager {
                 }
                 Err("Native filter wheel not connected".to_string())
             }
+            DriverType::Alpaca => {
+                let wheels = self.alpaca_filter_wheels.read().await;
+                if let Some(wheel) = wheels.get(device_id) {
+                    return wheel.position().await;
+                }
+                Err(format!("Alpaca filter wheel {} not found", device_id))
+            }
+            DriverType::Indi => {
+                // Parse INDI device ID: indi:host:port:device_name
+                let parts: Vec<&str> = device_id.split(':').collect();
+                if parts.len() < 4 {
+                    return Err("Invalid INDI device ID format".to_string());
+                }
+                let server_key = format!("{}:{}", parts[1], parts[2]);
+                let device_name = parts[3..].join(":");
+
+                let clients = self.indi_clients.read().await;
+                if let Some(client) = clients.get(&server_key) {
+                    let locked = client.read().await;
+                    // INDI filter slots are 1-based
+                    if let Some(pos) = locked.get_number(&device_name, "FILTER_SLOT", "FILTER_SLOT_VALUE").await {
+                        return Ok(pos as i32);
+                    }
+                    return Err("Could not read filter position from INDI device".to_string());
+                }
+                Err("INDI filter wheel not connected".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3424,6 +3475,32 @@ impl DeviceManager {
                     return wheel.is_moving().await.map_err(|e| e.to_string());
                 }
                 Err("Native filter wheel not connected".to_string())
+            }
+            DriverType::Alpaca => {
+                let wheels = self.alpaca_filter_wheels.read().await;
+                if let Some(wheel) = wheels.get(device_id) {
+                    // Alpaca filter wheels return -1 for position when moving
+                    let pos = wheel.position().await?;
+                    return Ok(pos == -1);
+                }
+                Err(format!("Alpaca filter wheel {} not found", device_id))
+            }
+            DriverType::Indi => {
+                // Parse INDI device ID: indi:host:port:device_name
+                let parts: Vec<&str> = device_id.split(':').collect();
+                if parts.len() < 4 {
+                    return Err("Invalid INDI device ID format".to_string());
+                }
+                let server_key = format!("{}:{}", parts[1], parts[2]);
+                let device_name = parts[3..].join(":");
+
+                let clients = self.indi_clients.read().await;
+                if let Some(client) = clients.get(&server_key) {
+                    let locked = client.read().await;
+                    // INDI uses property busy state to indicate movement
+                    return Ok(locked.is_property_busy(&device_name, "FILTER_SLOT").await);
+                }
+                Err("INDI filter wheel not connected".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
