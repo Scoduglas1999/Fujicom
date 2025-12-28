@@ -2974,6 +2974,24 @@ impl DeviceManager {
                 }
                 Err("Alpaca focuser not connected".to_string())
             }
+            DriverType::Indi => {
+                // Parse INDI device ID: indi:host:port:device_name
+                let parts: Vec<&str> = device_id.split(':').collect();
+                if parts.len() >= 4 {
+                    let host = parts[1];
+                    let port: u16 = parts[2].parse().map_err(|_| "Invalid port in INDI device ID")?;
+                    let device_name = parts[3..].join(":");
+                    let server_key = format!("{}:{}", host, port);
+
+                    let clients = self.indi_clients.read().await;
+                    if let Some(client) = clients.get(&server_key) {
+                        let focuser = nightshade_indi::IndiFocuser::new(client.clone(), &device_name);
+                        return focuser.move_to(position).await;
+                    }
+                    return Err(format!("INDI client not connected for {}", server_key));
+                }
+                Err("Invalid INDI device ID format".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3013,6 +3031,24 @@ impl DeviceManager {
                 }
                 Err("Alpaca focuser not connected".to_string())
             }
+            DriverType::Indi => {
+                // Parse INDI device ID: indi:host:port:device_name
+                let parts: Vec<&str> = device_id.split(':').collect();
+                if parts.len() >= 4 {
+                    let host = parts[1];
+                    let port: u16 = parts[2].parse().map_err(|_| "Invalid port in INDI device ID")?;
+                    let device_name = parts[3..].join(":");
+                    let server_key = format!("{}:{}", host, port);
+
+                    let clients = self.indi_clients.read().await;
+                    if let Some(client) = clients.get(&server_key) {
+                        let focuser = nightshade_indi::IndiFocuser::new(client.clone(), &device_name);
+                        return focuser.move_relative(steps).await;
+                    }
+                    return Err(format!("INDI client not connected for {}", server_key));
+                }
+                Err("Invalid INDI device ID format".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3049,6 +3085,24 @@ impl DeviceManager {
                 }
                 Err("Alpaca focuser not connected".to_string())
             }
+            DriverType::Indi => {
+                // Parse INDI device ID: indi:host:port:device_name
+                let parts: Vec<&str> = device_id.split(':').collect();
+                if parts.len() >= 4 {
+                    let host = parts[1];
+                    let port: u16 = parts[2].parse().map_err(|_| "Invalid port in INDI device ID")?;
+                    let device_name = parts[3..].join(":");
+                    let server_key = format!("{}:{}", host, port);
+
+                    let clients = self.indi_clients.read().await;
+                    if let Some(client) = clients.get(&server_key) {
+                        let focuser = nightshade_indi::IndiFocuser::new(client.clone(), &device_name);
+                        return focuser.abort_motion().await;
+                    }
+                    return Err(format!("INDI client not connected for {}", server_key));
+                }
+                Err("Invalid INDI device ID format".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3083,6 +3137,24 @@ impl DeviceManager {
                     return focuser.position().await;
                 }
                 Err("Alpaca focuser not connected".to_string())
+            }
+            DriverType::Indi => {
+                // Parse INDI device ID: indi:host:port:device_name
+                let parts: Vec<&str> = device_id.split(':').collect();
+                if parts.len() >= 4 {
+                    let host = parts[1];
+                    let port: u16 = parts[2].parse().map_err(|_| "Invalid port in INDI device ID")?;
+                    let device_name = parts[3..].join(":");
+                    let server_key = format!("{}:{}", host, port);
+
+                    let clients = self.indi_clients.read().await;
+                    if let Some(client) = clients.get(&server_key) {
+                        let focuser = nightshade_indi::IndiFocuser::new(client.clone(), &device_name);
+                        return focuser.get_position().await;
+                    }
+                    return Err(format!("INDI client not connected for {}", server_key));
+                }
+                Err("Invalid INDI device ID format".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -3173,6 +3245,28 @@ impl DeviceManager {
                 }
                 Err("Alpaca focuser not connected".to_string())
             }
+            DriverType::Indi => {
+                // Parse INDI device ID: indi:host:port:device_name
+                let parts: Vec<&str> = device_id.split(':').collect();
+                if parts.len() >= 4 {
+                    let host = parts[1];
+                    let port: u16 = parts[2].parse().map_err(|_| "Invalid port in INDI device ID")?;
+                    let device_name = parts[3..].join(":");
+                    let server_key = format!("{}:{}", host, port);
+
+                    let clients = self.indi_clients.read().await;
+                    if let Some(client) = clients.get(&server_key) {
+                        let focuser = nightshade_indi::IndiFocuser::new(client.clone(), &device_name);
+                        // Temperature might not be available on all focusers
+                        match focuser.get_temperature().await {
+                            Ok(temp) => return Ok(Some(temp)),
+                            Err(_) => return Ok(None), // Temperature not available
+                        }
+                    }
+                    return Err(format!("INDI client not connected for {}", server_key));
+                }
+                Err("Invalid INDI device ID format".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3209,6 +3303,38 @@ impl DeviceManager {
                     return Ok((max_step, step_size));
                 }
                 Err("Alpaca focuser not connected".to_string())
+            }
+            DriverType::Indi => {
+                // Parse INDI device ID: indi:host:port:device_name
+                let parts: Vec<&str> = device_id.split(':').collect();
+                if parts.len() >= 4 {
+                    let host = parts[1];
+                    let port: u16 = parts[2].parse().map_err(|_| "Invalid port in INDI device ID")?;
+                    let device_name = parts[3..].join(":");
+                    let server_key = format!("{}:{}", host, port);
+
+                    let clients = self.indi_clients.read().await;
+                    if let Some(client) = clients.get(&server_key) {
+                        let client = client.read().await;
+
+                        // Try to get max position from FOCUS_MAX property (common INDI standard)
+                        // Fall back to reasonable default if not available
+                        let max_position = client.get_number(&device_name, "FOCUS_MAX", "FOCUS_MAX_VALUE")
+                            .await
+                            .map(|v| v as i32)
+                            .unwrap_or(100000); // Default max position
+
+                        // Step size is not universally standardized in INDI
+                        // Most focusers use discrete steps, default to 1.0 micron step
+                        let step_size = client.get_number(&device_name, "FOCUS_STEP", "FOCUS_STEP_VALUE")
+                            .await
+                            .unwrap_or(1.0);
+
+                        return Ok((max_position, step_size));
+                    }
+                    return Err(format!("INDI client not connected for {}", server_key));
+                }
+                Err("Invalid INDI device ID format".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
