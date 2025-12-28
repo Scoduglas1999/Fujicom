@@ -935,14 +935,203 @@ impl DeviceManager {
             }
         }
         
-        // If it's a native device, disconnect and remove it
-        if device_info.driver_type == DriverType::Native {
-            let mut native_devices = self.native_devices.write().await;
-            if let Some(mut device) = native_devices.remove(device_id) {
-                let _ = device.disconnect().await;
+        // Clean up device from driver-specific storage based on driver type and device type
+        match device_info.driver_type {
+            DriverType::Native => {
+                // Remove from generic native_devices map
+                let mut native_devices = self.native_devices.write().await;
+                if let Some(mut device) = native_devices.remove(device_id) {
+                    let _ = device.disconnect().await;
+                }
+
+                // Also remove from typed native storage maps
+                match device_info.device_type {
+                    DeviceType::Camera => {
+                        let mut cameras = self.native_cameras.write().await;
+                        if let Some(mut camera) = cameras.remove(device_id) {
+                            let _ = camera.disconnect().await;
+                        }
+                    }
+                    DeviceType::Mount => {
+                        let mut mounts = self.native_mounts.write().await;
+                        if let Some(mut mount) = mounts.remove(device_id) {
+                            let _ = mount.disconnect().await;
+                        }
+                    }
+                    DeviceType::Focuser => {
+                        let mut focusers = self.native_focusers.write().await;
+                        if let Some(mut focuser) = focusers.remove(device_id) {
+                            let _ = focuser.disconnect().await;
+                        }
+                    }
+                    DeviceType::FilterWheel => {
+                        let mut fws = self.native_filter_wheels.write().await;
+                        if let Some(mut fw) = fws.remove(device_id) {
+                            let _ = fw.disconnect().await;
+                        }
+                    }
+                    DeviceType::Rotator => {
+                        let mut rotators = self.native_rotators.write().await;
+                        if let Some(mut rotator) = rotators.remove(device_id) {
+                            let _ = rotator.disconnect().await;
+                        }
+                    }
+                    DeviceType::Dome => {
+                        let mut domes = self.native_domes.write().await;
+                        if let Some(mut dome) = domes.remove(device_id) {
+                            let _ = dome.disconnect().await;
+                        }
+                    }
+                    DeviceType::Weather => {
+                        let mut weather = self.native_weather.write().await;
+                        if let Some(mut w) = weather.remove(device_id) {
+                            let _ = w.disconnect().await;
+                        }
+                    }
+                    DeviceType::SafetyMonitor => {
+                        let mut safety = self.native_safety_monitors.write().await;
+                        if let Some(mut s) = safety.remove(device_id) {
+                            let _ = s.disconnect().await;
+                        }
+                    }
+                    _ => {} // Guider, Switch, CoverCalibrator - no typed native storage
+                }
+            }
+            DriverType::Alpaca => {
+                // Remove from Alpaca storage based on device type
+                match device_info.device_type {
+                    DeviceType::Camera => {
+                        let mut cameras = self.alpaca_cameras.write().await;
+                        if let Some(camera) = cameras.remove(device_id) {
+                            let _ = camera.disconnect().await;
+                        }
+                    }
+                    DeviceType::Mount => {
+                        let mut mounts = self.alpaca_mounts.write().await;
+                        if let Some(mount) = mounts.remove(device_id) {
+                            let _ = mount.disconnect().await;
+                        }
+                    }
+                    DeviceType::Focuser => {
+                        let mut focusers = self.alpaca_focusers.write().await;
+                        if let Some(focuser) = focusers.remove(device_id) {
+                            let _ = focuser.disconnect().await;
+                        }
+                    }
+                    DeviceType::FilterWheel => {
+                        let mut fws = self.alpaca_filter_wheels.write().await;
+                        if let Some(fw) = fws.remove(device_id) {
+                            let _ = fw.disconnect().await;
+                        }
+                    }
+                    DeviceType::Rotator => {
+                        let mut rotators = self.alpaca_rotators.write().await;
+                        if let Some(rotator) = rotators.remove(device_id) {
+                            let _ = rotator.disconnect().await;
+                        }
+                    }
+                    DeviceType::Dome => {
+                        let mut domes = self.alpaca_domes.write().await;
+                        if let Some(dome) = domes.remove(device_id) {
+                            let _ = dome.disconnect().await;
+                        }
+                    }
+                    DeviceType::Weather => {
+                        let mut weather = self.alpaca_weather.write().await;
+                        if let Some(w) = weather.remove(device_id) {
+                            let _ = w.disconnect().await;
+                        }
+                    }
+                    DeviceType::SafetyMonitor => {
+                        let mut safety = self.alpaca_safety_monitors.write().await;
+                        if let Some(s) = safety.remove(device_id) {
+                            let _ = s.disconnect().await;
+                        }
+                    }
+                    DeviceType::Switch => {
+                        let mut switches = self.alpaca_switches.write().await;
+                        if let Some(sw) = switches.remove(device_id) {
+                            let _ = sw.disconnect().await;
+                        }
+                    }
+                    DeviceType::CoverCalibrator => {
+                        let mut covers = self.alpaca_cover_calibrators.write().await;
+                        if let Some(cover) = covers.remove(device_id) {
+                            let _ = cover.disconnect().await;
+                        }
+                    }
+                    DeviceType::Guider => {} // Guider not implemented for Alpaca
+                }
+            }
+            #[cfg(windows)]
+            DriverType::Ascom => {
+                // Remove from ASCOM storage based on device type
+                match device_info.device_type {
+                    DeviceType::Camera => {
+                        let mut cameras = self.ascom_cameras.write().await;
+                        if let Some(camera) = cameras.remove(device_id) {
+                            let mut cam = camera.write().await;
+                            let _ = cam.disconnect().await;
+                        }
+                    }
+                    DeviceType::Mount => {
+                        let mut mounts = self.ascom_mounts.write().await;
+                        if let Some(mount) = mounts.remove(device_id) {
+                            let mut m = mount.write().await;
+                            let _ = m.disconnect().await;
+                        }
+                    }
+                    DeviceType::Focuser => {
+                        let mut focusers = self.ascom_focusers.write().await;
+                        if let Some(focuser) = focusers.remove(device_id) {
+                            let mut f = focuser.write().await;
+                            let _ = f.disconnect().await;
+                        }
+                    }
+                    DeviceType::FilterWheel => {
+                        let mut fws = self.ascom_filter_wheels.write().await;
+                        if let Some(fw) = fws.remove(device_id) {
+                            let mut f = fw.write().await;
+                            let _ = f.disconnect().await;
+                        }
+                    }
+                    DeviceType::Dome => {
+                        let mut domes = self.ascom_domes.write().await;
+                        if let Some(dome) = domes.remove(device_id) {
+                            let mut d = dome.write().await;
+                            let _ = d.disconnect().await;
+                        }
+                    }
+                    DeviceType::Switch => {
+                        let mut switches = self.ascom_switches.write().await;
+                        if let Some(sw) = switches.remove(device_id) {
+                            let mut s = sw.write().await;
+                            let _ = s.disconnect().await;
+                        }
+                    }
+                    DeviceType::CoverCalibrator => {
+                        let mut covers = self.ascom_cover_calibrators.write().await;
+                        if let Some(cover) = covers.remove(device_id) {
+                            let mut c = cover.write().await;
+                            let _ = c.disconnect().await;
+                        }
+                    }
+                    _ => {} // Rotator, Weather, SafetyMonitor, Guider - not implemented for ASCOM
+                }
+            }
+            #[cfg(not(windows))]
+            DriverType::Ascom => {
+                // ASCOM not available on non-Windows platforms
+            }
+            DriverType::Indi => {
+                // INDI cleanup handled separately through INDI client
+                // The client manages device connections internally
+            }
+            DriverType::Simulator => {
+                // Simulators don't need cleanup - they're virtual
             }
         }
-        
+
         // Publish event
         self.app_state.publish_equipment_event(
             EquipmentEvent::Disconnected {
