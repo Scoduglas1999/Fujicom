@@ -10,10 +10,31 @@ use tokio::time::sleep;
 
 // Image processing imports for live display
 use nightshade_imaging::{
-    ImageData, BayerPattern, DebayerAlgorithm,
+    ImageData as ImagingImageData, BayerPattern, DebayerAlgorithm, PixelType,
     debayer, auto_stretch_stf, apply_stretch,
     auto_stretch_rgb, apply_stretch_rgb,
 };
+
+/// Image data for polar alignment UI display.
+/// This struct contains all the information needed by the UI to display
+/// the current image and overlay plate solve information.
+#[derive(Debug, Clone)]
+pub struct PolarAlignmentImageData {
+    /// JPEG-encoded image bytes for display
+    pub image_data: Vec<u8>,
+    /// Image width
+    pub width: u32,
+    /// Image height
+    pub height: u32,
+    /// Plate solve result RA (if available)
+    pub solved_ra: Option<f64>,
+    /// Plate solve result Dec (if available)
+    pub solved_dec: Option<f64>,
+    /// Current measurement point (1-3) or 0 for adjustment phase
+    pub point: i32,
+    /// Phase: "measuring" or "adjusting"
+    pub phase: String,
+}
 
 /// Configuration for polar alignment
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -83,6 +104,7 @@ pub async fn perform_polar_alignment(
     config: &PolarAlignConfig,
     ctx: &InstructionContext,
     status_callback: impl Fn(String, Option<f64>),
+    image_callback: impl Fn(PolarAlignmentImageData),
 ) -> InstructionResult {
     let mount_id = match ctx.mount_id() {
         Ok(id) => id.to_string(),
@@ -127,7 +149,7 @@ pub async fn perform_polar_alignment(
         }
 
         status_callback(format!("Measuring point {}/3...", i + 1), Some((i as f64) / 3.0));
-        
+
         // Capture image
         let image_data = match ctx.device_ops.camera_start_exposure(
             &camera_id,
@@ -141,6 +163,44 @@ pub async fn perform_polar_alignment(
             Err(e) => return InstructionResult::failure(format!("Failed to capture image: {}", e)),
         };
 
+        // Emit image for UI display (before plate solve, without coordinates)
+        let is_color = image_data.sensor_type.as_deref() == Some("Color");
+        let bayer_pattern = image_data.bayer_offset.map(|(x, y)| {
+            // Convert bayer offset to pattern
+            match (x % 2, y % 2) {
+                (0, 0) => BayerPattern::RGGB,
+                (1, 0) => BayerPattern::GRBG,
+                (0, 1) => BayerPattern::GBRG,
+                (1, 1) => BayerPattern::BGGR,
+                _ => BayerPattern::RGGB,
+            }
+        });
+
+        // Convert device_ops ImageData to imaging ImageData for prepare_image_for_display
+        // device_ops uses Vec<u16>, imaging uses Vec<u8> (packed little-endian)
+        let packed_data: Vec<u8> = image_data.data.iter()
+            .flat_map(|&v| v.to_le_bytes())
+            .collect();
+        let imaging_image_data = ImagingImageData {
+            width: image_data.width,
+            height: image_data.height,
+            channels: 1,
+            pixel_type: PixelType::U16,
+            data: packed_data,
+        };
+
+        if let Ok(jpeg_data) = prepare_image_for_display(&imaging_image_data, is_color, bayer_pattern) {
+            image_callback(PolarAlignmentImageData {
+                image_data: jpeg_data,
+                width: image_data.width,
+                height: image_data.height,
+                solved_ra: None,
+                solved_dec: None,
+                point: (i + 1) as i32,
+                phase: "measuring".to_string(),
+            });
+        }
+
         // Plate solve
         let solve_result = match ctx.device_ops.plate_solve(
             &image_data, None, None, Some(config.solve_timeout)
@@ -149,6 +209,19 @@ pub async fn perform_polar_alignment(
             Ok(_) => return InstructionResult::failure("Plate solve failed"),
             Err(e) => return InstructionResult::failure(format!("Plate solve error: {}", e)),
         };
+
+        // Emit image again with plate solve coordinates
+        if let Ok(jpeg_data) = prepare_image_for_display(&imaging_image_data, is_color, bayer_pattern) {
+            image_callback(PolarAlignmentImageData {
+                image_data: jpeg_data,
+                width: image_data.width,
+                height: image_data.height,
+                solved_ra: Some(solve_result.ra_degrees),
+                solved_dec: Some(solve_result.dec_degrees),
+                point: (i + 1) as i32,
+                phase: "measuring".to_string(),
+            });
+        }
 
         points.push((solve_result.ra_degrees, solve_result.dec_degrees));
 
@@ -186,7 +259,7 @@ pub async fn perform_polar_alignment(
 
     // 3. Adjustment Loop
     status_callback("Entering adjustment mode".to_string(), Some(1.0));
-    
+
     loop {
         if let Some(result) = ctx.check_cancelled() {
             return result;
@@ -196,7 +269,7 @@ pub async fn perform_polar_alignment(
         let image_data = match ctx.device_ops.camera_start_exposure(
             &camera_id,
             config.exposure_time,
-            None, None, 
+            None, None,
             config.binning.unwrap_or(1),
             config.binning.unwrap_or(1),
         ).await {
@@ -204,12 +277,61 @@ pub async fn perform_polar_alignment(
             Err(e) => return InstructionResult::failure(format!("Failed to capture image: {}", e)),
         };
 
+        // Emit image for UI display (before plate solve)
+        let is_color = image_data.sensor_type.as_deref() == Some("Color");
+        let bayer_pattern = image_data.bayer_offset.map(|(x, y)| {
+            match (x % 2, y % 2) {
+                (0, 0) => BayerPattern::RGGB,
+                (1, 0) => BayerPattern::GRBG,
+                (0, 1) => BayerPattern::GBRG,
+                (1, 1) => BayerPattern::BGGR,
+                _ => BayerPattern::RGGB,
+            }
+        });
+
+        // Convert device_ops ImageData to imaging ImageData for prepare_image_for_display
+        let packed_data: Vec<u8> = image_data.data.iter()
+            .flat_map(|&v| v.to_le_bytes())
+            .collect();
+        let imaging_image_data = ImagingImageData {
+            width: image_data.width,
+            height: image_data.height,
+            channels: 1,
+            pixel_type: PixelType::U16,
+            data: packed_data,
+        };
+
+        if let Ok(jpeg_data) = prepare_image_for_display(&imaging_image_data, is_color, bayer_pattern) {
+            image_callback(PolarAlignmentImageData {
+                image_data: jpeg_data,
+                width: image_data.width,
+                height: image_data.height,
+                solved_ra: None,
+                solved_dec: None,
+                point: 0,
+                phase: "adjusting".to_string(),
+            });
+        }
+
         let solve_result = match ctx.device_ops.plate_solve(
             &image_data, None, None, Some(config.solve_timeout)
         ).await {
             Ok(res) if res.success => res,
             _ => continue, // Ignore solve failures in loop
         };
+
+        // Emit image again with plate solve coordinates
+        if let Ok(jpeg_data) = prepare_image_for_display(&imaging_image_data, is_color, bayer_pattern) {
+            image_callback(PolarAlignmentImageData {
+                image_data: jpeg_data,
+                width: image_data.width,
+                height: image_data.height,
+                solved_ra: Some(solve_result.ra_degrees),
+                solved_dec: Some(solve_result.dec_degrees),
+                point: 0,
+                phase: "adjusting".to_string(),
+            });
+        }
 
         // Calculate error
         let pole_dec = if config.is_north { 90.0 } else { -90.0 };
@@ -317,14 +439,14 @@ fn calculate_center_of_rotation(points: &[(f64, f64)]) -> (f64, f64) {
 /// then encoding to JPEG format for efficient transmission to the UI.
 ///
 /// # Arguments
-/// * `image_data` - The raw image data from the camera
+/// * `image_data` - The raw image data from the camera (nightshade_imaging::ImageData)
 /// * `is_color` - Whether this is a color camera (requires debayering)
 /// * `bayer_pattern` - Optional bayer pattern for color cameras (defaults to RGGB)
 ///
 /// # Returns
 /// JPEG-encoded bytes suitable for display, or an error message
 pub fn prepare_image_for_display(
-    image_data: &ImageData,
+    image_data: &ImagingImageData,
     is_color: bool,
     bayer_pattern: Option<BayerPattern>,
 ) -> Result<Vec<u8>, String> {

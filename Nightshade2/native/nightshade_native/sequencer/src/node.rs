@@ -31,6 +31,8 @@ pub struct ExecutionContext {
     pub resume_notify: Arc<tokio::sync::Notify>,
     /// Progress callback
     pub progress_callback: Option<Box<dyn Fn(ProgressUpdate) + Send + Sync>>,
+    /// Polar alignment image callback (for sending live images to UI)
+    pub polar_align_image_callback: Option<Box<dyn Fn(crate::polar_align::PolarAlignmentImageData) + Send + Sync>>,
     /// Connected device IDs
     pub camera_id: Option<String>,
     pub mount_id: Option<String>,
@@ -79,6 +81,7 @@ impl ExecutionContext {
             is_paused: Arc::new(AtomicBool::new(false)),
             resume_notify: Arc::new(tokio::sync::Notify::new()),
             progress_callback: None,
+            polar_align_image_callback: None,
             camera_id: None,
             mount_id: None,
             focuser_id: None,
@@ -1010,6 +1013,7 @@ impl Node for RuntimeNode {
                 let ctx = context.to_instruction_context().await;
                 let node_id = self.id().clone();
                 let progress_cb = context.progress_callback.as_ref();
+                let image_cb = context.polar_align_image_callback.as_ref();
 
                 execute_polar_alignment(config, &ctx, |msg, _progress| {
                     if let Some(cb) = progress_cb {
@@ -1023,6 +1027,10 @@ impl Node for RuntimeNode {
                             total_children: None,
                             completed_exposure_secs: None,
                         });
+                    }
+                }, |image_data| {
+                    if let Some(cb) = image_cb {
+                        cb(image_data);
                     }
                 }).await.log_and_get_status("Polar Alignment")
             }
@@ -1575,6 +1583,7 @@ impl RuntimeNode {
                     is_paused,
                     resume_notify,
                     progress_callback: None,
+                    polar_align_image_callback: None,
                     camera_id,
                     mount_id,
                     focuser_id,

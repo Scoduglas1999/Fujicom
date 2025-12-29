@@ -1617,6 +1617,9 @@ pub async fn execute_stop_guiding(
 // FILTER CHANGE INSTRUCTION
 // =============================================================================
 
+/// Default timeout for filter wheel change operations (in seconds)
+const DEFAULT_FILTER_WHEEL_TIMEOUT_SECS: u64 = 120;
+
 /// Execute filter change
 pub async fn execute_filter_change(
     config: &FilterConfig,
@@ -1628,7 +1631,12 @@ pub async fn execute_filter_change(
         Err(e) => return e,
     };
 
-    tracing::info!("Changing filter to: {}", config.filter_name);
+    // Use configured timeout or default
+    let timeout = Duration::from_secs(
+        config.timeout_secs.map(|s| s as u64).unwrap_or(DEFAULT_FILTER_WHEEL_TIMEOUT_SECS)
+    );
+
+    tracing::info!("Changing filter to: {} (timeout: {:?})", config.filter_name, timeout);
 
     // Emit initial progress
     if let Some(cb) = progress_callback {
@@ -1643,7 +1651,7 @@ pub async fn execute_filter_change(
                     cb(50.0, format!("Moving to position {}", index));
                 }
                 // Wait for filter wheel to reach target position (the wait function also verifies)
-                if let Err(e) = wait_for_filterwheel_idle(&fw_id, index, ctx, Duration::from_secs(120)).await {
+                if let Err(e) = wait_for_filterwheel_idle(&fw_id, index, ctx, timeout).await {
                     return InstructionResult::failure(e);
                 }
                 if let Some(cb) = progress_callback {
@@ -1662,7 +1670,7 @@ pub async fn execute_filter_change(
                 cb(50.0, format!("Moving to {}", config.filter_name));
             }
             // Wait for filter wheel to reach target position
-            if let Err(e) = wait_for_filterwheel_idle(&fw_id, pos, ctx, Duration::from_secs(120)).await {
+            if let Err(e) = wait_for_filterwheel_idle(&fw_id, pos, ctx, timeout).await {
                 return InstructionResult::failure(e);
             }
             if let Some(cb) = progress_callback {
@@ -1909,8 +1917,14 @@ pub async fn execute_polar_alignment(
     config: &PolarAlignConfig,
     ctx: &InstructionContext,
     status_callback: impl Fn(String, Option<f64>),
+    image_callback: impl Fn(crate::polar_align::PolarAlignmentImageData),
 ) -> InstructionResult {
-    crate::polar_align::perform_polar_alignment(&config, ctx, |msg, progress| status_callback(msg, progress)).await
+    crate::polar_align::perform_polar_alignment(
+        config,
+        ctx,
+        |msg, progress| status_callback(msg, progress),
+        image_callback,
+    ).await
 }
 
 // =============================================================================
