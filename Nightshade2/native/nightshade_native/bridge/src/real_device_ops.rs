@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
-use chrono::Timelike;
+use chrono::{Datelike, Timelike};
 use nightshade_native::traits::NativeCamera;
 use nightshade_native::camera::ExposureParams;
 
@@ -34,6 +34,9 @@ pub struct RealDeviceOps {
     device_manager: Arc<DeviceManager>,
     /// Tracks pending filter wheel movements (device_id -> target position)
     fw_movements: Arc<RwLock<HashMap<String, FilterWheelMovement>>>,
+    /// Cached equipment profile to avoid blocking calls
+    /// Updated when profile changes (via set_profile)
+    cached_profile: Arc<RwLock<Option<crate::state::EquipmentProfile>>>,
 }
 
 impl RealDeviceOps {
@@ -42,20 +45,55 @@ impl RealDeviceOps {
             app_state,
             device_manager,
             fw_movements: Arc::new(RwLock::new(HashMap::new())),
+            cached_profile: Arc::new(RwLock::new(None)),
         }
     }
-    
-    /// Helper to get device ID from equipment profile
-    fn get_device_id(&self, device_type: crate::device::DeviceType) -> Option<String> {
-        // Query the current equipment profile for the device ID
+
+    /// Update the cached profile
+    /// Call this when the equipment profile changes
+    pub async fn update_cached_profile(&self) {
+        if let Some(profile) = self.app_state.get_profile().await {
+            let mut cached = self.cached_profile.write().await;
+            *cached = Some(profile);
+        }
+    }
+
+    /// Set a cached profile directly
+    pub async fn set_cached_profile(&self, profile: Option<crate::state::EquipmentProfile>) {
+        let mut cached = self.cached_profile.write().await;
+        *cached = profile;
+    }
+
+    /// Helper to get device ID from equipment profile (async version - preferred)
+    pub async fn get_device_id_async(&self, device_type: crate::device::DeviceType) -> Option<String> {
         use crate::device::DeviceType;
-        
-        let profile = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.app_state.get_profile().await
-            })
-        })?;
-        
+
+        // First try cached profile
+        {
+            let cached = self.cached_profile.read().await;
+            if let Some(ref profile) = *cached {
+                return match device_type {
+                    DeviceType::Camera => profile.camera_id.clone(),
+                    DeviceType::Mount => profile.mount_id.clone(),
+                    DeviceType::Focuser => profile.focuser_id.clone(),
+                    DeviceType::FilterWheel => profile.filter_wheel_id.clone(),
+                    DeviceType::Rotator => profile.rotator_id.clone(),
+                    DeviceType::Dome => profile.dome_id.clone(),
+                    DeviceType::Weather => profile.weather_id.clone(),
+                    _ => None,
+                };
+            }
+        }
+
+        // Fall back to fetching from app state
+        let profile = self.app_state.get_profile().await?;
+
+        // Update cache for next time
+        {
+            let mut cached = self.cached_profile.write().await;
+            *cached = Some(profile.clone());
+        }
+
         match device_type {
             DeviceType::Camera => profile.camera_id,
             DeviceType::Mount => profile.mount_id,
@@ -66,6 +104,77 @@ impl RealDeviceOps {
             DeviceType::Weather => profile.weather_id,
             _ => None,
         }
+    }
+
+    /// Helper to get device ID from equipment profile (sync version)
+    ///
+    /// WARNING: This method should only be called from sync contexts.
+    /// It uses try_read to avoid blocking and returns None if the lock is busy.
+    /// For async contexts, use `get_device_id_async` instead.
+    fn get_device_id(&self, device_type: crate::device::DeviceType) -> Option<String> {
+        use crate::device::DeviceType;
+
+        // First try the cached profile with non-blocking read
+        if let Ok(cached) = self.cached_profile.try_read() {
+            if let Some(ref profile) = *cached {
+                return match device_type {
+                    DeviceType::Camera => profile.camera_id.clone(),
+                    DeviceType::Mount => profile.mount_id.clone(),
+                    DeviceType::Focuser => profile.focuser_id.clone(),
+                    DeviceType::FilterWheel => profile.filter_wheel_id.clone(),
+                    DeviceType::Rotator => profile.rotator_id.clone(),
+                    DeviceType::Dome => profile.dome_id.clone(),
+                    DeviceType::Weather => profile.weather_id.clone(),
+                    _ => None,
+                };
+            }
+        }
+
+        // If we have no cached profile and we're in an async context,
+        // we need to be careful about blocking. Check if we have a runtime.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            // We have a runtime handle - use spawn_blocking to avoid deadlock
+            // But since this is sync, we need to block on the result
+            // This is still potentially problematic, so prefer async version
+            let app_state = self.app_state.clone();
+            let cached_profile = self.cached_profile.clone();
+
+            // Use block_in_place which is safe when called from a blocking task
+            // but NOT safe from an async task
+            let profile = std::thread::spawn(move || {
+                // Create a new runtime for this thread to avoid blocking the main one
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .ok()?;
+
+                rt.block_on(async {
+                    let profile = app_state.get_profile().await?;
+                    // Update cache
+                    let mut cached = cached_profile.write().await;
+                    *cached = Some(profile.clone());
+                    Some(profile)
+                })
+            })
+            .join()
+            .ok()
+            .flatten()?;
+
+            return match device_type {
+                DeviceType::Camera => profile.camera_id,
+                DeviceType::Mount => profile.mount_id,
+                DeviceType::Focuser => profile.focuser_id,
+                DeviceType::FilterWheel => profile.filter_wheel_id,
+                DeviceType::Rotator => profile.rotator_id,
+                DeviceType::Dome => profile.dome_id,
+                DeviceType::Weather => profile.weather_id,
+                _ => None,
+            };
+        }
+
+        // No runtime and no cached profile - return None
+        tracing::debug!("get_device_id: No runtime and no cached profile for {:?}", device_type);
+        None
     }
 
 
@@ -2360,46 +2469,43 @@ impl DeviceOps for RealDeviceOps {
         self.app_state.event_bus.publish(event);
         Ok(())
     }
-    
+
     // =========================================================================
     // UTILITY
     // =========================================================================
-    
+
     fn calculate_altitude(&self, ra_hours: f64, dec_degrees: f64, lat: f64, lon: f64) -> f64 {
         // Calculate altitude of a celestial object using standard astronomical formula
         // Convert to radians
         let lat_rad = lat.to_radians();
         let dec_rad = dec_degrees.to_radians();
-        
+
         // Calculate Local Sidereal Time (LST)
         // Approximate LST using current UTC time and longitude
         let now = chrono::Utc::now();
-        let j2000 = chrono::NaiveDate::from_ymd_opt(2000, 1, 1)
-            .unwrap()
-            .and_hms_opt(12, 0, 0)
-            .unwrap();
-        let days_since_j2000 = (now.naive_utc() - j2000).num_seconds() as f64 / 86400.0;
-        
+
+        // J2000.0 epoch: January 1, 2000, 12:00:00 TT (Julian Date 2451545.0)
+        // Calculate days since J2000 using a formula that avoids panics entirely.
+        let days_since_j2000 = calculate_days_since_j2000(&now);
+
         // Greenwich Mean Sidereal Time at 0h UT
         let gmst_at_0h = 280.46061837 + 360.98564736629 * days_since_j2000;
         let ut_hours = now.hour() as f64 + now.minute() as f64 / 60.0 + now.second() as f64 / 3600.0;
         let gmst = gmst_at_0h + 360.0 * ut_hours / 24.0;
-        
+
         // Local Sidereal Time
         let lst = (gmst + lon) % 360.0;
         let lst_hours = lst / 15.0; // Convert to hours
-        
+
         // Hour angle
         let ha_hours = lst_hours - ra_hours;
         let ha_rad = (ha_hours * 15.0).to_radians();
-        
+
         // Calculate altitude
         let sin_alt = lat_rad.sin() * dec_rad.sin() + lat_rad.cos() * dec_rad.cos() * ha_rad.cos();
-        let altitude = sin_alt.asin().to_degrees();
-        
-        altitude
+        sin_alt.asin().to_degrees()
     }
-    
+
     fn get_observer_location(&self) -> Option<(f64, f64)> {
         // Get observer location from app settings
         match self.app_state.get_observer_location() {
@@ -2651,30 +2757,74 @@ impl DeviceOps for RealDeviceOps {
 /// Decode base64 string to bytes (for Alpaca ImageArray)
 fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
     const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-    
+
     let input = input.trim().replace('\n', "").replace('\r', "");
     let mut output = Vec::with_capacity(input.len() * 3 / 4);
-    
+
     let mut buf = 0u32;
     let mut bits = 0;
-    
+
     for c in input.bytes() {
         if c == b'=' {
             break;
         }
-        
+
         let val = ALPHABET.iter().position(|&x| x == c)
             .ok_or_else(|| format!("Invalid base64 character: {}", c as char))?;
-        
+
         buf = (buf << 6) | (val as u32);
         bits += 6;
-        
+
         if bits >= 8 {
             bits -= 8;
             output.push((buf >> bits) as u8);
             buf &= (1 << bits) - 1;
         }
     }
-    
+
     Ok(output)
+}
+
+/// Calculate days since J2000.0 epoch without any unwrap/panic potential.
+///
+/// J2000.0 epoch is January 1, 2000, 12:00:00 TT (Julian Date 2451545.0)
+/// This uses a direct calculation approach that cannot panic.
+///
+/// This is a module-level helper function to avoid issues with trait impl blocks.
+fn calculate_days_since_j2000(dt: &chrono::DateTime<chrono::Utc>) -> f64 {
+    // Julian Date formula (Meeus, Astronomical Algorithms)
+    // This formula works for any valid DateTime and never panics
+    let year = dt.year();
+    let month = dt.month() as i32;
+    let day = dt.day() as i32;
+
+    // Adjust year and month for the algorithm (Jan/Feb are month 13/14 of prev year)
+    let (y, m) = if month <= 2 {
+        (year - 1, month + 12)
+    } else {
+        (year, month)
+    };
+
+    // Calculate Julian Day Number for the date
+    let a = y / 100;
+    let b = 2 - a + (a / 4);
+
+    // Integer part of Julian Day Number at noon
+    let jdn = (365.25 * (y + 4716) as f64).floor()
+        + (30.6001 * (m + 1) as f64).floor()
+        + day as f64
+        + b as f64
+        - 1524.5;
+
+    // Add fractional day from time
+    let hours = dt.hour() as f64;
+    let minutes = dt.minute() as f64;
+    let seconds = dt.second() as f64;
+    let fractional_day = (hours + minutes / 60.0 + seconds / 3600.0) / 24.0;
+
+    let julian_date = jdn + fractional_day;
+
+    // J2000.0 epoch is Julian Date 2451545.0
+    const J2000_JD: f64 = 2451545.0;
+    julian_date - J2000_JD
 }
