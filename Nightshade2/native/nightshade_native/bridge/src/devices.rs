@@ -2189,7 +2189,8 @@ impl DeviceManager {
             Some(DriverType::Simulator) => {
                 Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
-            _ => Err("Not implemented for this driver type".to_string()),
+            Some(_) => Err("Not implemented for this driver type".to_string()),
+            None => Err("Driver type not found".to_string()),
         }
     }
 
@@ -2457,6 +2458,9 @@ impl DeviceManager {
                 }
                 Err("Native mount not connected".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -2485,6 +2489,9 @@ impl DeviceManager {
                 }
                 Err("Native mount not connected".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -2512,6 +2519,9 @@ impl DeviceManager {
                     return mount.set_tracking(enabled).await.map_err(|e| e.to_string());
                 }
                 Err("Native mount not connected".to_string())
+            }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -2548,6 +2558,9 @@ impl DeviceManager {
                     return mount.pulse_guide(dir, duration_ms).await.map_err(|e| e.to_string());
                 }
                 Err("Native mount not connected".to_string())
+            }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -2722,6 +2735,9 @@ impl DeviceManager {
                     return Err(format!("INDI client not connected for {}", server_key));
                 }
                 Err("Invalid INDI device ID format".to_string())
+            }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -2967,6 +2983,9 @@ impl DeviceManager {
                 }
                 Err("Invalid INDI device ID format".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3024,6 +3043,9 @@ impl DeviceManager {
                 }
                 Err("Invalid INDI device ID format".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3078,6 +3100,9 @@ impl DeviceManager {
                 }
                 Err("Invalid INDI device ID format".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3131,6 +3156,9 @@ impl DeviceManager {
                 }
                 Err("Invalid INDI device ID format".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3183,6 +3211,9 @@ impl DeviceManager {
                     return Err(format!("INDI client not connected for {}", server_key));
                 }
                 Err("Invalid INDI device ID format".to_string())
+            }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -3241,6 +3272,9 @@ impl DeviceManager {
                     return Err(format!("INDI client not connected for {}", server_key));
                 }
                 Err("Invalid INDI device ID format".to_string())
+            }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -3311,6 +3345,9 @@ impl DeviceManager {
                 }
                 Err("Invalid INDI device ID format".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3368,6 +3405,9 @@ impl DeviceManager {
                 }
                 Err("INDI filter wheel not connected".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3423,6 +3463,9 @@ impl DeviceManager {
                 }
                 Err("INDI filter wheel not connected".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3476,6 +3519,9 @@ impl DeviceManager {
                     return Ok(locked.is_property_busy(&device_name, "FILTER_SLOT").await);
                 }
                 Err("INDI filter wheel not connected".to_string())
+            }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -3565,6 +3611,9 @@ impl DeviceManager {
                 tracing::error!("filter_wheel_get_config: Native filter wheel '{}' not found in native_filter_wheels map!", device_id);
                 Err("Native filter wheel not connected".to_string())
             }
+            DriverType::Simulator => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3612,6 +3661,9 @@ impl DeviceManager {
                 }
                 Err("Native rotator not connected".to_string())
             }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3652,6 +3704,9 @@ impl DeviceManager {
                     return rotator.move_to(position).await.map_err(|e| e.to_string());
                 }
                 Err("Native rotator not connected".to_string())
+            }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -3694,6 +3749,9 @@ impl DeviceManager {
                 }
                 Err("Native rotator not connected".to_string())
             }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3719,6 +3777,9 @@ impl DeviceManager {
                     return rotator.is_moving().await.map_err(|e| e.to_string());
                 }
                 Err("Native rotator not connected".to_string())
+            }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -3778,6 +3839,9 @@ impl DeviceManager {
                 }
                 Err("Native dome not connected".to_string())
             }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3832,6 +3896,9 @@ impl DeviceManager {
                 }
                 Err("Native dome not connected".to_string())
             }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -3885,6 +3952,9 @@ impl DeviceManager {
                     return dome.slew_to_azimuth(azimuth).await.map_err(|e| e.to_string());
                 }
                 Err("Native dome not connected".to_string())
+            }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -3941,6 +4011,9 @@ impl DeviceManager {
                     return dome.get_azimuth().await.map_err(|e| e.to_string());
                 }
                 Err("Native dome not connected".to_string())
+            }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -4012,6 +4085,9 @@ impl DeviceManager {
                 }
                 Err("Native dome not connected".to_string())
             }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -4066,6 +4142,9 @@ impl DeviceManager {
                 }
                 Err("Native dome not connected".to_string())
             }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -4104,6 +4183,9 @@ impl DeviceManager {
                     return dome.is_slewing().await.map_err(|e| e.to_string());
                 }
                 Err("Native dome not connected".to_string())
+            }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
@@ -4274,6 +4356,9 @@ impl DeviceManager {
                 }
                 Err("Native dome not connected".to_string())
             }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -4352,6 +4437,9 @@ impl DeviceManager {
                 }
                 Err("Native weather device not connected".to_string())
             }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -4386,6 +4474,9 @@ impl DeviceManager {
                     return safety.is_safe().await.map_err(|e| e.to_string());
                 }
                 Err("Native safety monitor not connected".to_string())
+            }
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             _ => Err("Not implemented for this driver type".to_string()),
         }
