@@ -163,33 +163,6 @@ impl RealDeviceOps {
         Ok(())
     }
 
-    /// Validate connection for a device type from the equipment profile.
-    ///
-    /// This is a convenience method that looks up the device ID from the profile
-    /// and then validates its connection state.
-    ///
-    /// # Arguments
-    /// * `device_type` - The type of device to validate
-    /// * `operation` - Description of the operation (for error messages)
-    ///
-    /// # Returns
-    /// * `Ok(device_id)` if the device is connected, returning the device ID
-    /// * `Err(String)` if the device is not configured or not connected
-    async fn validate_profile_device_connection(
-        &self,
-        device_type: crate::device::DeviceType,
-        operation: &str,
-    ) -> DeviceResult<String> {
-        let device_id = self.get_device_id_async(device_type).await
-            .ok_or_else(|| format!(
-                "No {} configured in equipment profile. Cannot perform: {}",
-                device_type.as_str(), operation
-            ))?;
-
-        self.validate_connection(&device_id, operation).await?;
-        Ok(device_id)
-    }
-
     /// Update the cached profile
     /// Call this when the equipment profile changes
     pub async fn update_cached_profile(&self) {
@@ -2503,6 +2476,9 @@ impl DeviceOps for RealDeviceOps {
     async fn dome_open(&self, dome_id: &str) -> DeviceResult<()> {
         tracing::info!("Opening dome shutter {}", dome_id);
 
+        // Opening the shutter is a safety-critical operation
+        self.validate_connection(dome_id, "open dome shutter").await?;
+
         get_device_manager().dome_open_shutter(dome_id)
             .await
             .map_err(|e| format!("Open dome shutter failed: {}", e))
@@ -2511,6 +2487,9 @@ impl DeviceOps for RealDeviceOps {
     async fn dome_close(&self, dome_id: &str) -> DeviceResult<()> {
         tracing::info!("Closing dome shutter {}", dome_id);
 
+        // Closing the shutter is a safety-critical operation
+        self.validate_connection(dome_id, "close dome shutter").await?;
+
         get_device_manager().dome_close_shutter(dome_id)
             .await
             .map_err(|e| format!("Close dome shutter failed: {}", e))
@@ -2518,6 +2497,9 @@ impl DeviceOps for RealDeviceOps {
 
     async fn dome_park(&self, dome_id: &str) -> DeviceResult<()> {
         tracing::info!("Parking dome {}", dome_id);
+
+        // Parking moves the dome to a known position
+        self.validate_connection(dome_id, "park dome").await?;
 
         get_device_manager().dome_park(dome_id)
             .await
