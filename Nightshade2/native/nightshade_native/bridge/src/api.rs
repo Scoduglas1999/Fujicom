@@ -4686,7 +4686,15 @@ pub fn api_sequencer_event_stream() -> impl futures::Stream<Item = String> {
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    tracing::warn!("Sequencer event stream lagged, missed {} events", n);
+                    // Update the global dropped event counter
+                    let previous_total = TOTAL_DROPPED_EVENTS.fetch_add(n, Ordering::Relaxed);
+                    let new_total = previous_total + n;
+
+                    tracing::warn!(
+                        "[SEQUENCER_EVENT_STREAM] Event stream lagged! Skipped {} events (total dropped: {}). \
+                        Consider increasing buffer size or optimizing event handling.",
+                        n, new_total
+                    );
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                     break;
