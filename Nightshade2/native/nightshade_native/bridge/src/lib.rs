@@ -175,17 +175,30 @@ pub(crate) fn try_create_runtime() -> Result<Runtime, NightshadeError> {
     })
 }
 
-/// Initialize panic handler to catch panics and log them
-fn init_panic_handler() {
-    panic::set_hook(Box::new(|panic_info| {
-        let msg = panic_info.to_string();
-        let location = panic_info.location().map(|l| {
-            format!("{}:{}:{}", l.file(), l.line(), l.column())
-        }).unwrap_or_else(|| "unknown".to_string());
+/// Tracks whether the panic handler has been installed.
+/// Used to prevent installing the panic hook multiple times.
+static PANIC_HANDLER_INSTALLED: AtomicBool = AtomicBool::new(false);
 
-        eprintln!("PANIC at {}: {}", location, msg);
-        tracing::error!("PANIC at {}: {}", location, msg);
-    }));
+/// Initialize panic handler to catch panics and log them.
+/// This function is idempotent - multiple calls are safe and will be no-ops after the first.
+fn init_panic_handler() {
+    // Use compare_exchange to ensure we only install the handler once
+    if PANIC_HANDLER_INSTALLED.compare_exchange(
+        false,
+        true,
+        Ordering::SeqCst,
+        Ordering::SeqCst,
+    ).is_ok() {
+        panic::set_hook(Box::new(|panic_info| {
+            let msg = panic_info.to_string();
+            let location = panic_info.location().map(|l| {
+                format!("{}:{}:{}", l.file(), l.line(), l.column())
+            }).unwrap_or_else(|| "unknown".to_string());
+
+            eprintln!("PANIC at {}: {}", location, msg);
+            tracing::error!("PANIC at {}: {}", location, msg);
+        }));
+    }
 }
 
 /// Initialize the native bridge with logging
@@ -434,7 +447,7 @@ pub fn get_native_version() -> String {
 ///     })
 /// }
 /// ```
-pub fn catch_panic_sync<F, T>(f: F) -> Result<T, NightshadeError>
+pub(crate) fn catch_panic_sync<F, T>(f: F) -> Result<T, NightshadeError>
 where
     F: FnOnce() -> Result<T, NightshadeError> + panic::UnwindSafe,
 {
@@ -466,7 +479,7 @@ where
 ///     }).await
 /// }
 /// ```
-pub async fn catch_panic_async<F, T>(f: F) -> Result<T, NightshadeError>
+pub(crate) async fn catch_panic_async<F, T>(f: F) -> Result<T, NightshadeError>
 where
     F: std::future::Future<Output = Result<T, NightshadeError>>,
 {

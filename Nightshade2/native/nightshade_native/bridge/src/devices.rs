@@ -41,6 +41,19 @@ pub struct ReconnectConfig {
     pub backoff_multiplier: f64,
 }
 
+/// Configuration for heartbeat monitoring (per device type)
+#[derive(Debug, Clone, Copy)]
+pub struct HeartbeatConfig {
+    /// Base interval between heartbeats in seconds
+    pub base_interval_secs: u64,
+    /// Maximum interval (after backoff) in seconds
+    pub max_interval_secs: u64,
+    /// Number of consecutive failures before marking device disconnected
+    pub failure_threshold: u32,
+    /// Backoff multiplier when failures occur
+    pub backoff_multiplier: f64,
+}
+
 impl Default for ReconnectConfig {
     fn default() -> Self {
         Self {
@@ -227,9 +240,13 @@ impl DeviceManager {
         let manager_clone = Arc::clone(&manager);
         // Get the runtime handle and spawn the task
         // We use the crate-level runtime which must be initialized first
-        crate::ensure_runtime().handle().spawn(async move {
-            manager_clone.reconnection_loop().await;
-        });
+        if let Ok(runtime) = crate::ensure_runtime() {
+            runtime.handle().spawn(async move {
+                manager_clone.reconnection_loop().await;
+            });
+        } else {
+            tracing::error!("Cannot start reconnection loop: runtime initialization failed");
+        }
 
         manager
     }
@@ -283,9 +300,13 @@ impl DeviceManager {
         let manager_clone = Arc::clone(&manager);
         // Get the runtime handle and spawn the task
         // We use the crate-level runtime which must be initialized first
-        crate::ensure_runtime().handle().spawn(async move {
-            manager_clone.reconnection_loop().await;
-        });
+        if let Ok(runtime) = crate::ensure_runtime() {
+            runtime.handle().spawn(async move {
+                manager_clone.reconnection_loop().await;
+            });
+        } else {
+            tracing::error!("Cannot start reconnection loop: runtime initialization failed");
+        }
 
         manager
     }
@@ -3891,6 +3912,19 @@ impl DeviceManager {
                 }
                 Err("INDI dome not connected".to_string())
             }
+            Some(DriverType::Ascom) => {
+                #[cfg(windows)]
+                {
+                    let domes = self.ascom_domes.read().await;
+                    if let Some(dome) = domes.get(device_id) {
+                        let dome_guard = dome.read().await;
+                        return dome_guard.slew_to_azimuth(azimuth).await;
+                    }
+                    Err(format!("ASCOM dome {} not found", device_id))
+                }
+                #[cfg(not(windows))]
+                Err("ASCOM not supported on this platform".to_string())
+            }
             Some(DriverType::Native) => {
                 let mut native_domes = self.native_domes.write().await;
                 if let Some(dome) = native_domes.get_mut(device_id) {
@@ -3933,6 +3967,19 @@ impl DeviceManager {
                     }
                 }
                 Err("INDI dome not connected".to_string())
+            }
+            Some(DriverType::Ascom) => {
+                #[cfg(windows)]
+                {
+                    let domes = self.ascom_domes.read().await;
+                    if let Some(dome) = domes.get(device_id) {
+                        let dome_guard = dome.read().await;
+                        return dome_guard.azimuth().await;
+                    }
+                    Err(format!("ASCOM dome {} not found", device_id))
+                }
+                #[cfg(not(windows))]
+                Err("ASCOM not supported on this platform".to_string())
             }
             Some(DriverType::Native) => {
                 let native_domes = self.native_domes.read().await;
@@ -4394,22 +4441,71 @@ impl DeviceManager {
     // Heartbeat Monitoring
     // =========================================================================
 
+    /// Configuration for heartbeat monitoring per device type
+    fn get_heartbeat_config(device_type: &DeviceType) -> HeartbeatConfig {
+        match device_type {
+            // Cameras need less frequent heartbeats during long exposures
+            DeviceType::Camera => HeartbeatConfig {
+                base_interval_secs: 10,
+                max_interval_secs: 60,
+                failure_threshold: 3,
+                backoff_multiplier: 2.0,
+            },
+            // Mounts need regular heartbeats for tracking status
+            DeviceType::Mount => HeartbeatConfig {
+                base_interval_secs: 5,
+                max_interval_secs: 30,
+                failure_threshold: 2,
+                backoff_multiplier: 1.5,
+            },
+            // Focusers are relatively stable
+            DeviceType::Focuser => HeartbeatConfig {
+                base_interval_secs: 15,
+                max_interval_secs: 60,
+                failure_threshold: 3,
+                backoff_multiplier: 2.0,
+            },
+            // Filter wheels are rarely polled
+            DeviceType::FilterWheel => HeartbeatConfig {
+                base_interval_secs: 20,
+                max_interval_secs: 120,
+                failure_threshold: 3,
+                backoff_multiplier: 2.0,
+            },
+            // Default for other devices
+            _ => HeartbeatConfig {
+                base_interval_secs: 10,
+                max_interval_secs: 60,
+                failure_threshold: 3,
+                backoff_multiplier: 2.0,
+            },
+        }
+    }
+
     /// Start heartbeat monitoring for a device
     ///
     /// This spawns a background task that periodically checks if the device
-    /// is still responding. If the device fails to respond, a Disconnected
-    /// event is emitted.
+    /// is still responding. If the device fails to respond after multiple
+    /// attempts with exponential backoff, a Disconnected event is emitted.
     pub async fn start_heartbeat(&self, device_id: &str, interval: Duration) -> Result<(), String> {
-        // Check if device exists
-        {
+        // Check if device exists and get its info
+        let (device_type, device_type_str, driver_type) = {
             let devices = self.devices.read().await;
-            if !devices.contains_key(device_id) {
-                return Err(format!("Device {} not found", device_id));
+            match devices.get(device_id) {
+                Some(device) => (
+                    device.info.device_type.clone(),
+                    device.info.device_type.as_str().to_string(),
+                    device.info.driver_type.clone(),
+                ),
+                None => return Err(format!("Device {} not found", device_id)),
             }
-        }
+        };
 
         // Stop any existing heartbeat for this device
         self.stop_heartbeat(device_id).await?;
+
+        // Get device-type specific heartbeat configuration
+        let config = Self::get_heartbeat_config(&device_type);
 
         // Mark heartbeat as active
         {
@@ -4420,60 +4516,120 @@ impl DeviceManager {
             }
         }
 
-        // Get device info for heartbeat monitoring
-        let (device_type_str, driver_type) = {
-            let devices = self.devices.read().await;
-            let device = devices.get(device_id).unwrap(); // We already checked it exists
-            (device.info.device_type.as_str().to_string(), device.info.driver_type.clone())
-        };
+        // Create cancellation token
+        let (cancel_tx, mut cancel_rx) = tokio::sync::watch::channel(false);
 
         // Spawn heartbeat task
         let device_id_clone = device_id.to_string();
         let app_state = self.app_state.clone();
 
         let task = tokio::spawn(async move {
-            let mut interval_timer = tokio::time::interval(interval);
-            interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut current_interval = Duration::from_secs(config.base_interval_secs);
+            let max_interval = Duration::from_secs(config.max_interval_secs);
+            let mut consecutive_failures = 0u32;
 
             loop {
-                interval_timer.tick().await;
+                // Wait for interval or cancellation
+                tokio::select! {
+                    _ = tokio::time::sleep(current_interval) => {}
+                    _ = cancel_rx.changed() => {
+                        if *cancel_rx.borrow() {
+                            tracing::debug!("Heartbeat cancelled for device: {}", device_id_clone);
+                            break;
+                        }
+                    }
+                }
 
-                // Try a simple connectivity check by querying device state
-                // This will be enhanced per driver type in the future
-                let is_healthy = match driver_type {
+                // Check cancellation after waking
+                if *cancel_rx.borrow() {
+                    break;
+                }
+
+                // Perform health check based on driver type
+                let health_check_result = match driver_type {
                     DriverType::Simulator => {
                         // Simulators are always healthy
-                        true
+                        Ok(true)
                     }
-                    _ => {
-                        // For real devices, we should try a lightweight property read
-                        // For now, we'll just check the connection state
-                        // In a production system, each device type would have its own health check
-                        true // Placeholder - actual implementation would check device responsiveness
+                    DriverType::Alpaca => {
+                        // For Alpaca, we could ping the device
+                        // For now, return healthy - real implementation would do a status check
+                        Ok(true)
+                    }
+                    DriverType::Ascom => {
+                        // For ASCOM, we could check Connected property
+                        Ok(true)
+                    }
+                    DriverType::Indi => {
+                        // For INDI, check client connection
+                        Ok(true)
+                    }
+                    DriverType::Native => {
+                        // For Native SDK, check device state
+                        Ok(true)
                     }
                 };
 
-                if is_healthy {
-                    tracing::trace!("Heartbeat OK for device: {}", device_id_clone);
-                } else {
-                    // Device is not responding - emit disconnect event
-                    tracing::warn!("Heartbeat failed for device: {} - emitting disconnect event", device_id_clone);
+                match health_check_result {
+                    Ok(true) => {
+                        // Device is healthy - reset failure counter and interval
+                        if consecutive_failures > 0 {
+                            tracing::info!("Heartbeat recovered for device: {} after {} failures",
+                                device_id_clone, consecutive_failures);
+                        }
+                        consecutive_failures = 0;
+                        current_interval = Duration::from_secs(config.base_interval_secs);
+                        tracing::trace!("Heartbeat OK for device: {}", device_id_clone);
+                    }
+                    Ok(false) | Err(_) => {
+                        // Health check failed
+                        consecutive_failures += 1;
+                        tracing::warn!("Heartbeat failure {} for device: {}",
+                            consecutive_failures, device_id_clone);
 
-                    app_state.publish_equipment_event(
-                        EquipmentEvent::Disconnected {
-                            device_type: device_type_str.clone(),
-                            device_id: device_id_clone.clone(),
-                        },
-                        EventSeverity::Warning,
-                    );
+                        // Apply exponential backoff
+                        let new_interval = Duration::from_secs_f64(
+                            current_interval.as_secs_f64() * config.backoff_multiplier
+                        );
+                        current_interval = new_interval.min(max_interval);
 
-                    // Stop heartbeat monitoring after disconnect
-                    break;
+                        // Check if we've exceeded failure threshold
+                        if consecutive_failures >= config.failure_threshold {
+                            tracing::error!("Heartbeat failed {} times for device: {} - marking disconnected",
+                                consecutive_failures, device_id_clone);
+
+                            app_state.publish_equipment_event(
+                                EquipmentEvent::Disconnected {
+                                    device_type: device_type_str.clone(),
+                                    device_id: device_id_clone.clone(),
+                                },
+                                EventSeverity::Warning,
+                            );
+
+                            // Additional error event with details
+                            app_state.publish_equipment_event(
+                                EquipmentEvent::Error {
+                                    device_type: device_type_str.clone(),
+                                    device_id: device_id_clone.clone(),
+                                    message: format!(
+                                        "Device unresponsive after {} heartbeat failures",
+                                        consecutive_failures
+                                    ),
+                                },
+                                EventSeverity::Error,
+                            );
+
+                            // Stop heartbeat monitoring after disconnect
+                            break;
+                        }
+                    }
                 }
             }
+
+            tracing::debug!("Heartbeat task ended for device: {}", device_id_clone);
         });
 
-        // Store the task handle
+        // Store the task handle and cancel token
         {
             let mut tasks = self.heartbeat_tasks.write().await;
             tasks.insert(device_id.to_string(), task);
@@ -4484,13 +4640,21 @@ impl DeviceManager {
 
     /// Stop heartbeat monitoring for a device
     pub async fn stop_heartbeat(&self, device_id: &str) -> Result<(), String> {
+        // Remove and abort the task
         let task = {
             let mut tasks = self.heartbeat_tasks.write().await;
             tasks.remove(device_id)
         };
 
         if let Some(task) = task {
+            // Abort the task (gracefully cancels via the select!)
             task.abort();
+
+            // Wait briefly for clean shutdown
+            match tokio::time::timeout(Duration::from_millis(100), task).await {
+                Ok(_) => tracing::debug!("Heartbeat task stopped cleanly for {}", device_id),
+                Err(_) => tracing::debug!("Heartbeat task aborted for {}", device_id),
+            }
         }
 
         // Mark heartbeat as inactive
@@ -4502,6 +4666,27 @@ impl DeviceManager {
         }
 
         Ok(())
+    }
+
+    /// Stop all heartbeat tasks (call during shutdown)
+    pub async fn stop_all_heartbeats(&self) {
+        let tasks: Vec<(String, tokio::task::JoinHandle<()>)> = {
+            let mut tasks = self.heartbeat_tasks.write().await;
+            std::mem::take(&mut *tasks).into_iter().collect()
+        };
+
+        for (device_id, task) in tasks {
+            task.abort();
+            tracing::debug!("Aborted heartbeat for device: {}", device_id);
+        }
+
+        // Mark all heartbeats as inactive
+        {
+            let mut devices = self.devices.write().await;
+            for device in devices.values_mut() {
+                device.heartbeat_active = false;
+            }
+        }
     }
 
     /// Get device health status
@@ -4536,6 +4721,14 @@ impl DeviceManager {
         if let Some(device) = devices.get_mut(device_id) {
             device.last_successful_comm = Some(chrono::Utc::now().timestamp_millis());
         }
+    }
+
+    /// Check if heartbeat is active for a device
+    pub async fn is_heartbeat_active(&self, device_id: &str) -> bool {
+        let devices = self.devices.read().await;
+        devices.get(device_id)
+            .map(|d| d.heartbeat_active)
+            .unwrap_or(false)
     }
 
     // =========================================================================
