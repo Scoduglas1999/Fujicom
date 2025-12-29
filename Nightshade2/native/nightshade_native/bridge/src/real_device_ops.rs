@@ -1076,143 +1076,132 @@ impl DeviceOps for RealDeviceOps {
 
         // Alpaca camera support (cross-platform)
         if camera_id.starts_with("alpaca:") {
-            // Parse alpaca:http://192.168.1.100:11111:camera:0
-            let id_str = camera_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-            
-            if parts.len() >= 5 {
-                let protocol = parts[0]; // "http" or "https"
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let _device_type = parts[3];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                
-                tracing::info!("Connecting to Alpaca camera at {}, device {}", base_url, device_num);
-                
-                let camera = AlpacaCamera::from_server(&base_url, device_num);
-                
-                // Connect to camera
-                camera.connect().await?;
-                
-                // Set parameters
-                if let Some(g) = gain {
-                    // Check if camera supports gain
-                    if camera.gain_max().await.unwrap_or(0) > 0 {
-                        camera.set_gain(g).await?;
-                    }
+            // Parse alpaca:http://192.168.1.100:11111:camera:0 using safe parser
+            let alpaca_info = parse_alpaca_device_id(camera_id)?;
+
+            tracing::info!("Connecting to Alpaca camera at {}, device {}", alpaca_info.base_url, alpaca_info.device_num);
+
+            let camera = AlpacaCamera::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+
+            // Connect to camera
+            camera.connect().await?;
+
+            // Set parameters
+            if let Some(g) = gain {
+                // Check if camera supports gain
+                if camera.gain_max().await.unwrap_or(0) > 0 {
+                    camera.set_gain(g).await?;
                 }
-                if let Some(o) = offset {
-                    if camera.offset_max().await.unwrap_or(0) > 0 {
-                        camera.set_offset(o).await?;
-                    }
-                }
-                camera.set_bin_x(bin_x).await?;
-                camera.set_bin_y(bin_y).await?;
-                
-                // Start exposure
-                camera.start_exposure(duration_secs, true).await?; // true = light frame
-                
-                // Poll for completion
-                while !camera.image_ready().await? {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-                
-                // Get image dimensions
-                let _width = camera.camera_x_size().await? as u32 / bin_x as u32;
-                let _height = camera.camera_y_size().await? as u32 / bin_y as u32;
-                
-                // Get image array (returns JSON string with base64 data)
-                let image_json = camera.image_array().await?;
-                
-                // Parse Alpaca ImageArray JSON response
-                // Format: {"Type": 2, "Rank": 2, "Value": "base64data..."}
-                let parsed: serde_json::Value = serde_json::from_str(&image_json)
-                    .map_err(|e| format!("Failed to parse Alpaca ImageArray JSON: {}", e))?;
-                
-                let base64_data = parsed.get("Value")
-                    .and_then(|v| v.as_str())
-                    .ok_or("No Value field in ImageArray response")?;
-                
-                // Decode base64 to bytes
-                let decoded_bytes = decode_base64(base64_data)?;
-                
-                // Get dimensions
-                let width = camera.camera_x_size().await? as u32 / bin_x as u32;
-                let height = camera.camera_y_size().await? as u32 / bin_y as u32;
-                
-                // Alpaca ImageArray Type: 0=Int16Array, 1=Int32Array, 2=DoubleArray
-                let array_type = parsed.get("Type")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(1); // Default to Int32
-                
-                // Convert bytes to u16 based on array type
-                let data: Vec<u16> = match array_type {
-                    0 => {
-                        // Int16Array - convert i16 to u16
-                        decoded_bytes.chunks_exact(2)
-                            .map(|chunk| {
-                                let val = i16::from_le_bytes([chunk[0], chunk[1]]);
-                                val.max(0) as u16
-                            })
-                            .collect()
-                    },
-                    1 => {
-                        // Int32Array - convert i32 to u16
-                        decoded_bytes.chunks_exact(4)
-                            .map(|chunk| {
-                                let val = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-                                val.max(0).min(65535) as u16
-                            })
-                            .collect()
-                    },
-                    _ => {
-                        return Err(format!("Unsupported Alpaca array type: {}", array_type));
-                    }
-                };
-                
-                // Query color metadata
-                let sensor_type_code = camera.sensor_type().await.ok();
-                let sensor_type = match sensor_type_code {
-                    Some(0) => Some("Monochrome".to_string()),
-                    Some(1) => Some("Color".to_string()),
-                    Some(2) => Some("RGGB".to_string()),
-                    Some(3) => Some("CMYG".to_string()),
-                    _ => None,
-                };
-                
-                let is_color = sensor_type.as_deref() == Some("Color") 
-                    || sensor_type.as_deref() == Some("RGGB");
-                
-                let bayer_offset = if is_color {
-                    let offset_x = camera.bayer_offset_x().await.ok();
-                    let offset_y = camera.bayer_offset_y().await.ok();
-                    match (offset_x, offset_y) {
-                        (Some(x), Some(y)) => Some((x, y)),
-                        _ => Some((0, 0)), // Default to RGGB
-                    }
-                } else {
-                    None
-                };
-                
-                camera.disconnect().await.ok(); // Clean disconnect
-                
-                return Ok(SeqImageData {
-                    width,
-                    height,
-                    data,
-                    bits_per_pixel: 16,
-                    exposure_secs: duration_secs,
-                    gain: gain,
-                    offset,
-                    temperature: camera.ccd_temperature().await.ok(),
-                    filter: filter_name,
-                    timestamp: chrono::Utc::now().timestamp(),
-                    sensor_type,
-                    bayer_offset,
-                });
             }
+            if let Some(o) = offset {
+                if camera.offset_max().await.unwrap_or(0) > 0 {
+                    camera.set_offset(o).await?;
+                }
+            }
+            camera.set_bin_x(bin_x).await?;
+            camera.set_bin_y(bin_y).await?;
+
+            // Start exposure
+            camera.start_exposure(duration_secs, true).await?; // true = light frame
+
+            // Poll for completion
+            while !camera.image_ready().await? {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+
+            // Get image dimensions
+            let _width = camera.camera_x_size().await? as u32 / bin_x as u32;
+            let _height = camera.camera_y_size().await? as u32 / bin_y as u32;
+
+            // Get image array (returns JSON string with base64 data)
+            let image_json = camera.image_array().await?;
+
+            // Parse Alpaca ImageArray JSON response
+            // Format: {"Type": 2, "Rank": 2, "Value": "base64data..."}
+            let parsed: serde_json::Value = serde_json::from_str(&image_json)
+                .map_err(|e| format!("Failed to parse Alpaca ImageArray JSON: {}", e))?;
+
+            let base64_data = parsed.get("Value")
+                .and_then(|v| v.as_str())
+                .ok_or("No Value field in ImageArray response")?;
+
+            // Decode base64 to bytes
+            let decoded_bytes = decode_base64(base64_data)?;
+
+            // Get dimensions
+            let width = camera.camera_x_size().await? as u32 / bin_x as u32;
+            let height = camera.camera_y_size().await? as u32 / bin_y as u32;
+
+            // Alpaca ImageArray Type: 0=Int16Array, 1=Int32Array, 2=DoubleArray
+            let array_type = parsed.get("Type")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(1); // Default to Int32
+
+            // Convert bytes to u16 based on array type
+            let data: Vec<u16> = match array_type {
+                0 => {
+                    // Int16Array - convert i16 to u16
+                    decoded_bytes.chunks_exact(2)
+                        .map(|chunk| {
+                            let val = i16::from_le_bytes([chunk[0], chunk[1]]);
+                            val.max(0) as u16
+                        })
+                        .collect()
+                },
+                1 => {
+                    // Int32Array - convert i32 to u16
+                    decoded_bytes.chunks_exact(4)
+                        .map(|chunk| {
+                            let val = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                            val.max(0).min(65535) as u16
+                        })
+                        .collect()
+                },
+                _ => {
+                    return Err(format!("Unsupported Alpaca array type: {}", array_type));
+                }
+            };
+
+            // Query color metadata
+            let sensor_type_code = camera.sensor_type().await.ok();
+            let sensor_type = match sensor_type_code {
+                Some(0) => Some("Monochrome".to_string()),
+                Some(1) => Some("Color".to_string()),
+                Some(2) => Some("RGGB".to_string()),
+                Some(3) => Some("CMYG".to_string()),
+                _ => None,
+            };
+
+            let is_color = sensor_type.as_deref() == Some("Color")
+                || sensor_type.as_deref() == Some("RGGB");
+
+            let bayer_offset = if is_color {
+                let offset_x = camera.bayer_offset_x().await.ok();
+                let offset_y = camera.bayer_offset_y().await.ok();
+                match (offset_x, offset_y) {
+                    (Some(x), Some(y)) => Some((x, y)),
+                    _ => Some((0, 0)), // Default to RGGB
+                }
+            } else {
+                None
+            };
+
+            camera.disconnect().await.ok(); // Clean disconnect
+
+            return Ok(SeqImageData {
+                width,
+                height,
+                data,
+                bits_per_pixel: 16,
+                exposure_secs: duration_secs,
+                gain: gain,
+                offset,
+                temperature: camera.ccd_temperature().await.ok(),
+                filter: filter_name,
+                timestamp: chrono::Utc::now().timestamp(),
+                sensor_type,
+                bayer_offset,
+            });
         }
 
         // Native camera support
@@ -1528,28 +1517,18 @@ impl DeviceOps for RealDeviceOps {
         
         // Alpaca focuser
         if focuser_id.starts_with("alpaca:") {
-            let id_str = focuser_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-            
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let focuser = AlpacaFocuser::from_server(&base_url, device_num);
-                focuser.connect().await?;
-                focuser.move_to(position).await?;
-                
-                // Wait for move to complete
-                while focuser.is_moving().await? {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-                focuser.disconnect().await.ok();
-                
-                return Ok(());
+            let alpaca_info = parse_alpaca_device_id(focuser_id)?;
+            let focuser = AlpacaFocuser::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            focuser.connect().await?;
+            focuser.move_to(position).await?;
+
+            // Wait for move to complete
+            while focuser.is_moving().await? {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
+            focuser.disconnect().await.ok();
+
+            return Ok(());
         }
 
         // Native focuser
@@ -1593,22 +1572,12 @@ impl DeviceOps for RealDeviceOps {
         }
         
         if focuser_id.starts_with("alpaca:") {
-            let id_str = focuser_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-            
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let focuser = AlpacaFocuser::from_server(&base_url, device_num);
-                focuser.connect().await?;
-                let pos = focuser.position().await?;
-                focuser.disconnect().await.ok();
-                return Ok(pos);
-            }
+            let alpaca_info = parse_alpaca_device_id(focuser_id)?;
+            let focuser = AlpacaFocuser::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            focuser.connect().await?;
+            let pos = focuser.position().await?;
+            focuser.disconnect().await.ok();
+            return Ok(pos);
         }
 
         // Native focuser
@@ -1627,7 +1596,7 @@ impl DeviceOps for RealDeviceOps {
         {
             if focuser_id.starts_with("ascom:") {
                 let prog_id = focuser_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1639,24 +1608,14 @@ impl DeviceOps for RealDeviceOps {
                 }).await.map_err(|e| format!("Task join error: {}", e))?;
             }
         }
-        
+
         if focuser_id.starts_with("alpaca:") {
-            let id_str = focuser_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-            
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let focuser = AlpacaFocuser::from_server(&base_url, device_num);
-                focuser.connect().await?;
-                let moving = focuser.is_moving().await?;
-                focuser.disconnect().await.ok();
-                return Ok(moving);
-            }
+            let alpaca_info = parse_alpaca_device_id(focuser_id)?;
+            let focuser = AlpacaFocuser::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            focuser.connect().await?;
+            let moving = focuser.is_moving().await?;
+            focuser.disconnect().await.ok();
+            return Ok(moving);
         }
 
         // Native focuser
@@ -1675,7 +1634,7 @@ impl DeviceOps for RealDeviceOps {
         {
             if focuser_id.starts_with("ascom:") {
                 let prog_id = focuser_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1687,24 +1646,14 @@ impl DeviceOps for RealDeviceOps {
                 }).await.map_err(|e| format!("Task join error: {}", e))?;
             }
         }
-        
+
         if focuser_id.starts_with("alpaca:") {
-            let id_str = focuser_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-            
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let focuser = AlpacaFocuser::from_server(&base_url, device_num);
-                focuser.connect().await?;
-                let temp = focuser.temperature().await.ok();
-                focuser.disconnect().await.ok();
-                return Ok(temp);
-            }
+            let alpaca_info = parse_alpaca_device_id(focuser_id)?;
+            let focuser = AlpacaFocuser::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            focuser.connect().await?;
+            let temp = focuser.temperature().await.ok();
+            focuser.disconnect().await.ok();
+            return Ok(temp);
         }
 
         // Native focuser
@@ -1739,24 +1688,14 @@ impl DeviceOps for RealDeviceOps {
         }
         
         if focuser_id.starts_with("alpaca:") {
-            let id_str = focuser_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-            
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let focuser = AlpacaFocuser::from_server(&base_url, device_num);
-                focuser.connect().await?;
-                focuser.halt().await?;
-                focuser.disconnect().await.ok();
-                return Ok(());
-            }
+            let alpaca_info = parse_alpaca_device_id(focuser_id)?;
+            let focuser = AlpacaFocuser::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            focuser.connect().await?;
+            focuser.halt().await?;
+            focuser.disconnect().await.ok();
+            return Ok(());
         }
-        
+
         if focuser_id.starts_with("sim_") {
             let mut focuser = get_sim_focuser().write().await;
             focuser.status.moving = false;
@@ -1813,26 +1752,16 @@ impl DeviceOps for RealDeviceOps {
         }
 
         if fw_id.starts_with("alpaca:") {
-            let id_str = fw_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
+            let alpaca_info = parse_alpaca_device_id(fw_id)?;
+            let fw = AlpacaFilterWheel::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            fw.connect().await?;
+            fw.set_position(position).await?;
 
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
+            // Wait for the filter wheel to complete the move
+            self.filterwheel_wait_for_move(fw_id).await?;
 
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let fw = AlpacaFilterWheel::from_server(&base_url, device_num);
-                fw.connect().await?;
-                fw.set_position(position).await?;
-
-                // Wait for the filter wheel to complete the move
-                self.filterwheel_wait_for_move(fw_id).await?;
-
-                fw.disconnect().await.ok();
-                return Ok(());
-            }
+            fw.disconnect().await.ok();
+            return Ok(());
         }
 
         // Native filter wheel
@@ -1865,7 +1794,7 @@ impl DeviceOps for RealDeviceOps {
         {
             if fw_id.starts_with("ascom:") {
                 let prog_id = fw_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1877,24 +1806,14 @@ impl DeviceOps for RealDeviceOps {
                 }).await.map_err(|e| format!("Task join error: {}", e))?;
             }
         }
-        
+
         if fw_id.starts_with("alpaca:") {
-            let id_str = fw_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-            
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let fw = AlpacaFilterWheel::from_server(&base_url, device_num);
-                fw.connect().await?;
-                let pos = fw.position().await?;
-                fw.disconnect().await.ok();
-                return Ok(pos);
-            }
+            let alpaca_info = parse_alpaca_device_id(fw_id)?;
+            let fw = AlpacaFilterWheel::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            fw.connect().await?;
+            let pos = fw.position().await?;
+            fw.disconnect().await.ok();
+            return Ok(pos);
         }
 
         // Native filter wheel
@@ -1927,22 +1846,12 @@ impl DeviceOps for RealDeviceOps {
         }
         
         if fw_id.starts_with("alpaca:") {
-            let id_str = fw_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
-            
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let fw = AlpacaFilterWheel::from_server(&base_url, device_num);
-                fw.connect().await?;
-                let names = fw.names().await?;
-                fw.disconnect().await.ok();
-                return Ok(names);
-            }
+            let alpaca_info = parse_alpaca_device_id(fw_id)?;
+            let fw = AlpacaFilterWheel::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            fw.connect().await?;
+            let names = fw.names().await?;
+            fw.disconnect().await.ok();
+            return Ok(names);
         }
 
         // Native filter wheel
@@ -2012,47 +1921,42 @@ impl DeviceOps for RealDeviceOps {
         }
         
         if rotator_id.starts_with("alpaca:") {
-            let parts: Vec<&str> = rotator_id.split(':').collect();
-            if parts.len() >= 3 {
-                let base_url = parts[1];
-                let device_number: u32 = parts[2].parse().map_err(|e| format!("Invalid device number: {}", e))?;
-                
-                let rotator = AlpacaRotator::from_server(base_url, device_number);
-                rotator.connect().await?;
-                rotator.move_absolute(angle).await?;
-                
-                // Wait for move to complete
-                while rotator.is_moving().await? {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-                
-                return Ok(());
+            let alpaca_info = parse_alpaca_device_id(rotator_id)?;
+            let rotator = AlpacaRotator::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            rotator.connect().await?;
+            rotator.move_absolute(angle).await?;
+
+            // Wait for move to complete
+            while rotator.is_moving().await? {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
+
+            return Ok(());
         }
-        
+
         Err(format!("Rotator {} not found or unsupported", rotator_id))
     }
-    
+
     async fn rotator_move_relative(&self, rotator_id: &str, delta: f64) -> DeviceResult<()> {
-        tracing::info!("Moving rotator {} by {}°", rotator_id, delta);
-        
+        tracing::info!("Moving rotator {} by {} degrees", rotator_id, delta);
+
         #[cfg(windows)]
         {
             if rotator_id.starts_with("ascom:") {
                 let prog_id = rotator_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
                         let mut rotator = AscomRotator::new(&prog_id)?;
-                        
+
                         // ASCOM doesn't strictly have move_relative, so we calculate target
                         let current = rotator.position()?;
                         let target = (current + delta) % 360.0;
                         let target = if target < 0.0 { target + 360.0 } else { target };
-                        
+
                         rotator.move_absolute(target)?;
-                        
+
                         // Wait for move to complete
                         while rotator.is_moving()? {
                             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -2064,38 +1968,32 @@ impl DeviceOps for RealDeviceOps {
                 }).await.map_err(|e| format!("Task join error: {}", e))?;
             }
         }
-        
+
         if rotator_id.starts_with("alpaca:") {
-            let parts: Vec<&str> = rotator_id.split(':').collect();
-            if parts.len() >= 3 {
-                let base_url = parts[1];
-                let device_number: u32 = parts[2].parse().map_err(|e| format!("Invalid device number: {}", e))?;
-                
-                let rotator = AlpacaRotator::from_server(base_url, device_number);
-                rotator.connect().await?;
-                
-                // Use Alpaca's move_relative if available, or calculate
-                // Alpaca 'move' is usually relative? Let's use move_relative wrapper
-                rotator.move_relative(delta).await?;
-                
-                // Wait for move to complete
-                while rotator.is_moving().await? {
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                }
-                
-                return Ok(());
+            let alpaca_info = parse_alpaca_device_id(rotator_id)?;
+            let rotator = AlpacaRotator::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            rotator.connect().await?;
+
+            // Use Alpaca's move_relative if available, or calculate
+            rotator.move_relative(delta).await?;
+
+            // Wait for move to complete
+            while rotator.is_moving().await? {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             }
+
+            return Ok(());
         }
-        
+
         Err(format!("Rotator {} not found or unsupported", rotator_id))
     }
-    
+
     async fn rotator_get_angle(&self, rotator_id: &str) -> DeviceResult<f64> {
         #[cfg(windows)]
         {
             if rotator_id.starts_with("ascom:") {
                 let prog_id = rotator_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -2107,18 +2005,13 @@ impl DeviceOps for RealDeviceOps {
                 }).await.map_err(|e| format!("Task join error: {}", e))?;
             }
         }
-        
+
         if rotator_id.starts_with("alpaca:") {
-            let parts: Vec<&str> = rotator_id.split(':').collect();
-            if parts.len() >= 3 {
-                let base_url = parts[1];
-                let device_number: u32 = parts[2].parse().map_err(|e| format!("Invalid device number: {}", e))?;
-                
-                let rotator = AlpacaRotator::from_server(base_url, device_number);
-                return Ok(rotator.position().await?);
-            }
+            let alpaca_info = parse_alpaca_device_id(rotator_id)?;
+            let rotator = AlpacaRotator::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            return Ok(rotator.position().await?);
         }
-        
+
         Err(format!("Rotator {} not found or unsupported", rotator_id))
     }
 
@@ -2143,18 +2036,13 @@ impl DeviceOps for RealDeviceOps {
         }
         
         if rotator_id.starts_with("alpaca:") {
-            let parts: Vec<&str> = rotator_id.split(':').collect();
-            if parts.len() >= 3 {
-                let base_url = parts[1];
-                let device_number: u32 = parts[2].parse().map_err(|e| format!("Invalid device number: {}", e))?;
-                
-                let rotator = AlpacaRotator::from_server(base_url, device_number);
-                rotator.connect().await?;
-                rotator.halt().await?;
-                return Ok(());
-            }
+            let alpaca_info = parse_alpaca_device_id(rotator_id)?;
+            let rotator = AlpacaRotator::from_server(&alpaca_info.base_url, alpaca_info.device_num);
+            rotator.connect().await?;
+            rotator.halt().await?;
+            return Ok(());
         }
-        
+
         if rotator_id.starts_with("sim_") {
             let mut rotator = get_sim_rotator().write().await;
             rotator.status.moving = false;
@@ -2631,32 +2519,22 @@ impl DeviceOps for RealDeviceOps {
 
         // Alpaca Safety Monitor
         if device_id.starts_with("alpaca:") {
-            let id_str = device_id.strip_prefix("alpaca:").unwrap_or("");
-            let parts: Vec<&str> = id_str.split(':').collect();
+            let alpaca_info = parse_alpaca_device_id(&device_id)?;
+            let safety = AlpacaSafetyMonitor::from_server(&alpaca_info.base_url, alpaca_info.device_num);
 
-            if parts.len() >= 5 {
-                let protocol = parts[0];
-                let host_part = parts[1].trim_start_matches("//");
-                let port = parts[2];
-                let device_num: u32 = parts[4].parse().unwrap_or(0);
-
-                let base_url = format!("{}://{}:{}", protocol, host_part, port);
-                let safety = AlpacaSafetyMonitor::from_server(&base_url, device_num);
-
-                match safety.connect().await {
-                    Ok(()) => {
-                        let is_safe = safety.is_safe().await.unwrap_or_else(|e| {
-                            tracing::warn!("Failed to get safety status: {}", e);
-                            true // Fail-open
-                        });
-                        safety.disconnect().await.ok();
-                        tracing::info!("Safety monitor {} reports: {}", device_id, if is_safe { "SAFE" } else { "UNSAFE" });
-                        return Ok(is_safe);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to connect to safety monitor {}: {}", device_id, e);
-                        return Ok(true); // Fail-open
-                    }
+            match safety.connect().await {
+                Ok(()) => {
+                    let is_safe = safety.is_safe().await.unwrap_or_else(|e| {
+                        tracing::warn!("Failed to get safety status: {}", e);
+                        true // Fail-open
+                    });
+                    safety.disconnect().await.ok();
+                    tracing::info!("Safety monitor {} reports: {}", device_id, if is_safe { "SAFE" } else { "UNSAFE" });
+                    return Ok(is_safe);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to connect to safety monitor {}: {}", device_id, e);
+                    return Ok(true); // Fail-open
                 }
             }
         }
