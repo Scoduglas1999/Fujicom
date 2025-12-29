@@ -326,9 +326,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<(), String>(())
                 }).await;
 
-                // Always try to disconnect after successful operation
-                mount.disconnect().await.ok();
-
                 return result;
             }
         }
@@ -377,7 +374,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<(f64, f64), String>((ra, dec))
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -426,7 +422,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<(), String>(())
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -480,7 +475,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<(), String>(())
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -529,7 +523,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<(), String>(())
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -575,7 +568,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<bool, String>(slewing)
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -621,7 +613,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<bool, String>(parked)
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -668,7 +659,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<bool, String>(can_flip)
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -724,7 +714,6 @@ impl DeviceOps for RealDeviceOps {
                     })
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -770,7 +759,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<bool, String>(tracking)
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -819,7 +807,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<(), String>(())
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
@@ -868,7 +855,6 @@ impl DeviceOps for RealDeviceOps {
                     Ok::<(), String>(())
                 }).await;
 
-                mount.disconnect().await.ok();
                 return result;
             }
         }
