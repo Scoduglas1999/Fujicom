@@ -185,6 +185,53 @@ impl InstructionContext {
 // SLEW INSTRUCTION
 // =============================================================================
 
+/// Default tolerance for slew position validation in degrees (1 arcminute = 1/60 degree)
+const SLEW_POSITION_TOLERANCE_DEG: f64 = 1.0 / 60.0;
+
+/// Normalize RA difference to account for wraparound at 24 hours
+/// Returns the shortest angular distance between two RA values in hours
+fn normalize_ra_diff_hours(diff: f64) -> f64 {
+    // Wrap to -12 to +12 hours range (equivalent to -180 to +180 degrees)
+    let mut wrapped = diff % 24.0;
+    if wrapped > 12.0 {
+        wrapped -= 24.0;
+    } else if wrapped < -12.0 {
+        wrapped += 24.0;
+    }
+    wrapped
+}
+
+/// Validate that mount reached the target position within tolerance
+/// ra_target and ra_actual are in hours, dec_target and dec_actual are in degrees
+/// tolerance_deg is the maximum allowed difference in degrees
+fn validate_slew_position(
+    ra_target: f64,
+    dec_target: f64,
+    ra_actual: f64,
+    dec_actual: f64,
+    tolerance_deg: f64,
+) -> Result<(), String> {
+    // Calculate RA difference (accounting for wraparound) and convert to degrees
+    let ra_diff_hours = normalize_ra_diff_hours(ra_actual - ra_target);
+    let ra_diff_deg = ra_diff_hours * 15.0; // 1 hour = 15 degrees
+
+    // Dec difference (no wraparound needed)
+    let dec_diff_deg = dec_actual - dec_target;
+
+    // Check if within tolerance
+    if ra_diff_deg.abs() > tolerance_deg || dec_diff_deg.abs() > tolerance_deg {
+        return Err(format!(
+            "Mount slew did not reach target position. Expected RA={:.4}h, Dec={:.4}°, \
+             got RA={:.4}h, Dec={:.4}° (diff: RA={:.2}', Dec={:.2}')",
+            ra_target, dec_target, ra_actual, dec_actual,
+            ra_diff_deg * 60.0, // Convert to arcminutes for readability
+            dec_diff_deg * 60.0
+        ));
+    }
+
+    Ok(())
+}
+
 /// Execute a slew instruction
 pub async fn execute_slew(
     config: &SlewConfig,
@@ -246,10 +293,51 @@ pub async fn execute_slew(
                     // Wait for mount to actually stop slewing
                     match wait_for_mount_idle_with_progress(mount_id, ctx, Duration::from_secs(1800), progress_callback).await {
                         Ok(_) => {
-                            if let Some(cb) = progress_callback {
-                                cb(100.0, format!("Arrived at RA: {:.2}h, Dec: {:.1}°", ra, dec));
+                            // Validate that mount reached the target position
+                            match ctx.device_ops.mount_get_coordinates(mount_id).await {
+                                Ok((actual_ra, actual_dec)) => {
+                                    tracing::debug!(
+                                        "Slew completed. Target: RA={:.4}h, Dec={:.4}°, Actual: RA={:.4}h, Dec={:.4}°",
+                                        ra, dec, actual_ra, actual_dec
+                                    );
+
+                                    // Validate position within tolerance (1 arcminute)
+                                    if let Err(e) = validate_slew_position(
+                                        ra, dec, actual_ra, actual_dec,
+                                        SLEW_POSITION_TOLERANCE_DEG,
+                                    ) {
+                                        tracing::warn!("Slew position validation failed: {}", e);
+                                        return InstructionResult::failure_with_recovery(
+                                            &e,
+                                            "SLEW_POSITION_MISMATCH",
+                                        );
+                                    }
+
+                                    if let Some(cb) = progress_callback {
+                                        cb(100.0, format!("Arrived at RA: {:.2}h, Dec: {:.1}°", actual_ra, actual_dec));
+                                    }
+                                    InstructionResult::success_with_message(format!(
+                                        "Slewed to RA: {:.4}h, Dec: {:.4}° (verified)",
+                                        actual_ra, actual_dec
+                                    ))
+                                }
+                                Err(e) => {
+                                    // Could not read coordinates to validate, but slew appeared to complete
+                                    // Log warning but consider it a success with caveat
+                                    tracing::warn!(
+                                        "Slew completed but could not verify position: {}. \
+                                         Assuming success based on slew completion.",
+                                        e
+                                    );
+                                    if let Some(cb) = progress_callback {
+                                        cb(100.0, format!("Arrived at RA: {:.2}h, Dec: {:.1}° (unverified)", ra, dec));
+                                    }
+                                    InstructionResult::success_with_message(format!(
+                                        "Slewed to RA: {:.4}h, Dec: {:.4}° (position unverified: {})",
+                                        ra, dec, e
+                                    ))
+                                }
                             }
-                            InstructionResult::success_with_message(format!("Slewed to RA: {:.4}h, Dec: {:.4}°", ra, dec))
                         }
                         Err(e) => InstructionResult::failure(e),
                     }
@@ -2926,5 +3014,78 @@ async fn wait_for_calibrator_state(
 
         // Poll every 200ms (calibrator state can change quickly)
         sleep(Duration::from_millis(200)).await;
+    }
+}
+
+// =============================================================================
+// TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_ra_diff_hours_no_wrap() {
+        // Simple cases with no wraparound
+        assert!((normalize_ra_diff_hours(1.0) - 1.0).abs() < 0.0001);
+        assert!((normalize_ra_diff_hours(-1.0) - (-1.0)).abs() < 0.0001);
+        assert!((normalize_ra_diff_hours(11.0) - 11.0).abs() < 0.0001);
+        assert!((normalize_ra_diff_hours(-11.0) - (-11.0)).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_normalize_ra_diff_hours_wraparound() {
+        // Wraparound cases: 23h to 1h should be 2h diff, not 22h
+        assert!((normalize_ra_diff_hours(22.0) - (-2.0)).abs() < 0.0001);
+        assert!((normalize_ra_diff_hours(-22.0) - 2.0).abs() < 0.0001);
+
+        // 13 hours should wrap to -11 hours (shorter path)
+        assert!((normalize_ra_diff_hours(13.0) - (-11.0)).abs() < 0.0001);
+        assert!((normalize_ra_diff_hours(-13.0) - 11.0).abs() < 0.0001);
+
+        // Edge case: exactly 12 hours
+        assert!((normalize_ra_diff_hours(12.0).abs() - 12.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_validate_slew_position_success() {
+        // Exact match
+        assert!(validate_slew_position(12.0, 45.0, 12.0, 45.0, 1.0 / 60.0).is_ok());
+
+        // Within tolerance (less than 1 arcminute = 1/60 degree)
+        let small_diff = 0.5 / 60.0; // 0.5 arcminute
+        let ra_diff_hours = small_diff / 15.0; // Convert degrees to hours
+        assert!(validate_slew_position(12.0, 45.0, 12.0 + ra_diff_hours, 45.0 + small_diff, 1.0 / 60.0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_slew_position_ra_failure() {
+        // RA exceeds tolerance (2 arcminutes when tolerance is 1)
+        let large_diff_hours = (2.0 / 60.0) / 15.0; // 2 arcminutes in hours
+        let result = validate_slew_position(12.0, 45.0, 12.0 + large_diff_hours, 45.0, 1.0 / 60.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("did not reach target"));
+    }
+
+    #[test]
+    fn test_validate_slew_position_dec_failure() {
+        // Dec exceeds tolerance
+        let large_diff_deg = 2.0 / 60.0; // 2 arcminutes
+        let result = validate_slew_position(12.0, 45.0, 12.0, 45.0 + large_diff_deg, 1.0 / 60.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("did not reach target"));
+    }
+
+    #[test]
+    fn test_validate_slew_position_ra_wraparound() {
+        // Test RA wraparound: target at 0.1h, actual at 23.9h should be 0.2h diff = 3 degrees
+        // This is well within tolerance (we'll use a generous tolerance for this test)
+        let tolerance = 5.0; // 5 degrees
+        assert!(validate_slew_position(0.1, 45.0, 23.9, 45.0, tolerance).is_ok());
+
+        // With 1 arcminute tolerance, 0.2h = 3 degrees should fail
+        let result = validate_slew_position(0.1, 45.0, 23.9, 45.0, 1.0 / 60.0);
+        assert!(result.is_err());
     }
 }
