@@ -445,6 +445,41 @@ async fn wait_for_focuser_idle(focuser_id: &str, ctx: &InstructionContext, timeo
     }
 }
 
+/// Wait for focuser to stop moving after a halt command (ignores cancellation token).
+/// This is used during cancellation handling to ensure the focuser has actually stopped
+/// before returning control. The timeout is shorter since we're just waiting for halt.
+pub async fn wait_for_focuser_stop_after_halt(
+    focuser_id: &str,
+    device_ops: &crate::device_ops::SharedDeviceOps,
+    timeout: Duration,
+) {
+    let start = std::time::Instant::now();
+    loop {
+        // Check if focuser is still moving
+        match device_ops.focuser_is_moving(focuser_id).await {
+            Ok(is_moving) => {
+                if !is_moving {
+                    tracing::debug!("Focuser stopped after halt");
+                    return;
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Error checking focuser status after halt: {}", e);
+                // Continue polling - transient error
+            }
+        }
+
+        // Check timeout
+        if start.elapsed() > timeout {
+            tracing::warn!("Focuser did not stop within {} seconds after halt", timeout.as_secs());
+            return;
+        }
+
+        // Poll every 100ms
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// Wait for filter wheel to reach target position with timeout
 async fn wait_for_filterwheel_idle(fw_id: &str, target_position: i32, ctx: &InstructionContext, timeout: Duration) -> Result<(), String> {
     let start = std::time::Instant::now();
@@ -892,7 +927,11 @@ pub async fn execute_autofocus(
 
     for point in 0..total_points {
         if let Some(result) = ctx.check_cancelled() {
-            // Return focuser to original position on cancel
+            // Halt focuser and wait for it to stop before returning
+            tracing::info!("Autofocus cancelled, halting focuser");
+            let _ = ctx.device_ops.focuser_halt(&focuser_id).await;
+            wait_for_focuser_stop_after_halt(&focuser_id, &ctx.device_ops, Duration::from_secs(10)).await;
+            // Optionally return to original position (start the move but don't wait - user cancelled)
             let _ = ctx.device_ops.focuser_move_to(&focuser_id, current_position).await;
             return result;
         }
@@ -944,6 +983,9 @@ pub async fn execute_autofocus(
 
             // If too many points have low star count, fail immediately
             if low_star_count_warnings > total_points / 2 {
+                // Halt focuser and wait for it to stop
+                let _ = ctx.device_ops.focuser_halt(&focuser_id).await;
+                wait_for_focuser_stop_after_halt(&focuser_id, &ctx.device_ops, Duration::from_secs(10)).await;
                 // Return focuser to original position
                 let _ = ctx.device_ops.focuser_move_to(&focuser_id, current_position).await;
                 return InstructionResult::failure(format!(
@@ -1001,6 +1043,9 @@ pub async fn execute_autofocus(
     tracing::info!("HFR variance: {:.2} (min: {:.2}, max: {:.2})", hfr_variance, min_hfr, max_hfr);
 
     if hfr_variance < MIN_HFR_VARIANCE {
+        // Halt focuser and wait for it to stop (focuser should already be idle here, but be safe)
+        let _ = ctx.device_ops.focuser_halt(&focuser_id).await;
+        wait_for_focuser_stop_after_halt(&focuser_id, &ctx.device_ops, Duration::from_secs(10)).await;
         // Return focuser to original position
         let _ = ctx.device_ops.focuser_move_to(&focuser_id, current_position).await;
         return InstructionResult::failure(format!(

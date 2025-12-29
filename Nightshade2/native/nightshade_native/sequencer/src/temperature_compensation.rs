@@ -3,7 +3,8 @@
 //! Monitors focuser temperature and adjusts focus position based on thermal coefficient
 //! to compensate for focus drift during long imaging sessions.
 
-use crate::instructions::{InstructionContext, InstructionResult};
+use crate::instructions::{InstructionContext, InstructionResult, wait_for_focuser_stop_after_halt};
+use std::time::Duration;
 
 /// Execute temperature compensation
 ///
@@ -204,6 +205,8 @@ pub async fn execute_temperature_compensation(
         if ctx.cancellation_token.load(std::sync::atomic::Ordering::Relaxed) {
             tracing::warn!("Temperature compensation cancelled, halting focuser");
             let _ = ctx.device_ops.focuser_halt(&focuser_id).await;
+            // Wait for focuser to actually stop before returning
+            wait_for_focuser_stop_after_halt(&focuser_id, &ctx.device_ops, Duration::from_secs(10)).await;
             return InstructionResult::cancelled("Temperature compensation cancelled");
         }
 
@@ -235,6 +238,8 @@ pub async fn execute_temperature_compensation(
         // Check timeout
         if move_start.elapsed() > timeout {
             let _ = ctx.device_ops.focuser_halt(&focuser_id).await;
+            // Wait for focuser to actually stop before returning
+            wait_for_focuser_stop_after_halt(&focuser_id, &ctx.device_ops, Duration::from_secs(10)).await;
             return InstructionResult::failure(format!(
                 "Focuser move timed out after {} seconds",
                 config.timeout_secs
