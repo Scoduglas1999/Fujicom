@@ -787,7 +787,25 @@ impl Node for RuntimeNode {
             }
             NodeType::Dither(config) => {
                 let ctx = context.to_instruction_context().await;
-                let result = execute_dither(config, &ctx).await;
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Dither: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                let result = execute_dither(config, &ctx, Some(&progress_fn)).await;
 
                 // Update trigger state after dither completes
                 if result.status == NodeStatus::Success {
