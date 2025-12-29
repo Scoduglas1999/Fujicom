@@ -1,46 +1,15 @@
 //! Common utilities for native SDK drivers
 //!
 //! This module provides:
-//! - Per-vendor SDK mutexes for thread safety (most vendor SDKs are NOT thread-safe)
 //! - Safe C string conversion with null-termination validation
 //! - Overflow-safe buffer size calculations
 //! - Common error handling utilities
+//!
+//! Note: Per-vendor SDK mutexes are defined in `sync.rs`, not here.
+//! Use functions like `zwo_camera_mutex()`, `qhy_mutex()`, etc. from `crate::sync`.
 
 use crate::traits::NativeError;
-use once_cell::sync::Lazy;
 use std::ffi::c_char;
-use tokio::sync::Mutex;
-
-// =============================================================================
-// PER-VENDOR SDK MUTEXES
-// =============================================================================
-// Most vendor SDKs are NOT thread-safe and will crash or produce undefined
-// behavior if called concurrently from multiple threads. These mutexes ensure
-// that all SDK operations for a given vendor are serialized.
-
-/// ZWO ASI SDK mutex - protects all ASI camera, EAF focuser, and EFW filter wheel operations
-pub static ZWO_SDK_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-/// QHY SDK mutex - protects all QHY camera and CFW operations
-pub static QHY_SDK_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-/// Player One SDK mutex - protects all Player One camera operations
-pub static PLAYER_ONE_SDK_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-/// SVBony SDK mutex - protects all SVBony camera operations
-pub static SVBONY_SDK_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-/// Atik SDK mutex - protects all Atik camera operations
-pub static ATIK_SDK_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-/// FLI SDK mutex - protects all FLI camera, focuser, and filter wheel operations
-pub static FLI_SDK_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-/// Touptek SDK mutex - protects all Touptek/OGMA camera operations
-pub static TOUPTEK_SDK_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-
-/// Moravian SDK mutex - protects all Moravian camera operations
-pub static MORAVIAN_SDK_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 // =============================================================================
 // SAFE STRING CONVERSION
