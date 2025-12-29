@@ -18,7 +18,7 @@
 use crate::camera::*;
 use crate::traits::*;
 use crate::utils::{
-    calculate_buffer_size_i32, safe_cstr_to_string, CleanupGuard, TimeoutTracker,
+    calculate_buffer_size_i32, safe_cstr_to_string, CleanupGuard,
     wait_for_exposure, wait_for_filterwheel_move, wait_for_focuser_move,
 };
 use crate::NativeVendor;
@@ -580,8 +580,9 @@ impl ZwoCamera {
 
     /// Download image with timeout protection.
     ///
-    /// This wrapper adds timeout tracking to the image download operation.
-    /// If the download takes longer than `config.image_download_timeout`, an error is returned.
+    /// This wrapper uses `tokio::time::timeout()` to enforce a hard timeout on the
+    /// image download operation. If the download takes longer than
+    /// `config.image_download_timeout`, the operation is cancelled and an error is returned.
     ///
     /// # Arguments
     /// * `config` - Timeout configuration
@@ -593,33 +594,22 @@ impl ZwoCamera {
         &mut self,
         config: &NativeTimeoutConfig,
     ) -> Result<ImageData, NativeError> {
-        let tracker = TimeoutTracker::new(config.image_download_timeout);
+        let timeout_duration = config.image_download_timeout;
 
-        // Get current ROI for error message
-        let (width, height) = (self.current_width as u32, self.current_height as u32);
-
-        // The actual download is a synchronous SDK call, so we use tokio::task::spawn_blocking
-        // to avoid blocking the async runtime. However, since we can't easily add a timeout
-        // to the SDK call itself, we track time before and after and report if it exceeded.
-        let start = std::time::Instant::now();
-        let result = self.download_image().await;
-        let elapsed = start.elapsed();
-
-        if elapsed > config.image_download_timeout {
-            tracing::warn!(
-                "ZWO image download took {:?} which exceeds timeout {:?}",
-                elapsed,
-                config.image_download_timeout
-            );
-            // Note: We still return the result if we got one, but log the warning
+        match tokio::time::timeout(timeout_duration, self.download_image()).await {
+            Ok(result) => result,
+            Err(_elapsed) => {
+                tracing::error!(
+                    "ZWO image download timed out after {:?}",
+                    timeout_duration
+                );
+                Err(NativeError::download_timeout(
+                    timeout_duration,
+                    self.current_width as u32,
+                    self.current_height as u32,
+                ))
+            }
         }
-
-        // Check if we're already past the timeout
-        if tracker.is_expired() {
-            return Err(NativeError::download_timeout(tracker.elapsed(), width, height));
-        }
-
-        result
     }
 }
 

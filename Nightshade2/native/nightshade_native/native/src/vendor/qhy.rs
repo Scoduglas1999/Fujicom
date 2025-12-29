@@ -15,7 +15,7 @@
 
 use crate::camera::*;
 use crate::traits::*;
-use crate::utils::{TimeoutTracker, wait_for_exposure};
+use crate::utils::wait_for_exposure;
 use crate::NativeVendor;
 use async_trait::async_trait;
 use std::ffi::{c_char, c_int, c_uint, c_double, c_void, CStr, CString};
@@ -539,8 +539,9 @@ impl QhyCamera {
 
     /// Download image with timeout protection.
     ///
-    /// This wrapper adds timeout tracking to the image download operation.
-    /// If the download takes longer than `config.image_download_timeout`, an error is returned.
+    /// This wrapper uses `tokio::time::timeout()` to enforce a hard timeout on the
+    /// image download operation. If the download takes longer than
+    /// `config.image_download_timeout`, the operation is cancelled and an error is returned.
     ///
     /// # Arguments
     /// * `config` - Timeout configuration
@@ -552,30 +553,22 @@ impl QhyCamera {
         &mut self,
         config: &NativeTimeoutConfig,
     ) -> Result<ImageData, NativeError> {
-        let tracker = TimeoutTracker::new(config.image_download_timeout);
+        let timeout_duration = config.image_download_timeout;
 
-        // Get current dimensions for error message
-        let (width, height) = (self.image_width, self.image_height);
-
-        // The actual download is a synchronous SDK call
-        let start = std::time::Instant::now();
-        let result = self.download_image().await;
-        let elapsed = start.elapsed();
-
-        if elapsed > config.image_download_timeout {
-            tracing::warn!(
-                "QHY image download took {:?} which exceeds timeout {:?}",
-                elapsed,
-                config.image_download_timeout
-            );
+        match tokio::time::timeout(timeout_duration, self.download_image()).await {
+            Ok(result) => result,
+            Err(_elapsed) => {
+                tracing::error!(
+                    "QHY image download timed out after {:?}",
+                    timeout_duration
+                );
+                Err(NativeError::download_timeout(
+                    timeout_duration,
+                    self.image_width,
+                    self.image_height,
+                ))
+            }
         }
-
-        // Check if we're already past the timeout
-        if tracker.is_expired() {
-            return Err(NativeError::download_timeout(tracker.elapsed(), width, height));
-        }
-
-        result
     }
 }
 
