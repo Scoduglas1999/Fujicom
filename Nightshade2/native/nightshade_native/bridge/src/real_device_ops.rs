@@ -532,7 +532,7 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if mount_id.starts_with("ascom:") {
-                let prog_id = mount_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+                let prog_id = parse_ascom_device_id(mount_id)?;
                 
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
@@ -867,14 +867,14 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if camera_id.starts_with("ascom:") {
-                let prog_id = camera_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+                let prog_id = parse_ascom_device_id(camera_id)?;
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
                         let mut camera = AscomCamera::new(&prog_id)?;
                         camera.connect()?;
-                        
+
                         //Set parameters
                         if let Some(g) = gain {
                             if let Err(e) = camera.set_gain(g) {
@@ -1282,8 +1282,8 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if camera_id.starts_with("ascom:") {
-                let prog_id = camera_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+                let prog_id = parse_ascom_device_id(camera_id)?;
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1327,12 +1327,12 @@ impl DeviceOps for RealDeviceOps {
 
     async fn camera_set_cooler(&self, camera_id: &str, enabled: bool, target_temp: f64) -> DeviceResult<()> {
         tracing::info!("Setting cooler on {} to {} (target: {}°C)", camera_id, enabled, target_temp);
-        
+
         #[cfg(windows)]
         {
             if camera_id.starts_with("ascom:") {
-                let prog_id = camera_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+                let prog_id = parse_ascom_device_id(camera_id)?;
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1381,8 +1381,8 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if camera_id.starts_with("ascom:") {
-                let prog_id = camera_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+                let prog_id = parse_ascom_device_id(camera_id)?;
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1424,8 +1424,8 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if camera_id.starts_with("ascom:") {
-                let prog_id = camera_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+                let prog_id = parse_ascom_device_id(camera_id)?;
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1467,18 +1467,18 @@ impl DeviceOps for RealDeviceOps {
     
     async fn focuser_move_to(&self, focuser_id: &str, position: i32) -> DeviceResult<()> {
         tracing::info!("Moving focuser {} to position {}", focuser_id, position);
-        
+
         #[cfg(windows)]
         {
             if focuser_id.starts_with("ascom:") {
-                let prog_id = focuser_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+                let prog_id = parse_ascom_device_id(focuser_id)?;
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
                         let mut focuser = AscomFocuser::new(&prog_id)?;
                         focuser.move_to(position)?;
-                        
+
                         // Wait for move to complete
                         while focuser.is_moving()? {
                             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1533,8 +1533,8 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if focuser_id.starts_with("ascom:") {
-                let prog_id = focuser_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+                let prog_id = parse_ascom_device_id(focuser_id)?;
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1571,7 +1571,7 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if focuser_id.starts_with("ascom:") {
-                let prog_id = focuser_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+                let prog_id = parse_ascom_device_id(focuser_id)?;
 
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
@@ -1609,7 +1609,7 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if focuser_id.starts_with("ascom:") {
-                let prog_id = focuser_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+                let prog_id = parse_ascom_device_id(focuser_id)?;
 
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
@@ -1645,11 +1645,11 @@ impl DeviceOps for RealDeviceOps {
 
     async fn focuser_halt(&self, focuser_id: &str) -> DeviceResult<()> {
         tracing::info!("Halting focuser {}", focuser_id);
-        
+
         #[cfg(windows)]
         {
             if focuser_id.starts_with("ascom:") {
-                let prog_id = focuser_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+                let prog_id = parse_ascom_device_id(focuser_id)?;
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1706,7 +1706,7 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if fw_id.starts_with("ascom:") {
-                let prog_id = fw_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+                let prog_id = parse_ascom_device_id(fw_id)?;
 
                 let result = tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
@@ -1769,7 +1769,7 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if fw_id.starts_with("ascom:") {
-                let prog_id = fw_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+                let prog_id = parse_ascom_device_id(fw_id)?;
 
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
@@ -1807,8 +1807,8 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if fw_id.starts_with("ascom:") {
-                let prog_id = fw_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+                let prog_id = parse_ascom_device_id(fw_id)?;
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
@@ -1872,18 +1872,18 @@ impl DeviceOps for RealDeviceOps {
     
     async fn rotator_move_to(&self, rotator_id: &str, angle: f64) -> DeviceResult<()> {
         tracing::info!("Moving rotator {} to {}°", rotator_id, angle);
-        
+
         #[cfg(windows)]
         {
             if rotator_id.starts_with("ascom:") {
-                let prog_id = rotator_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
-                
+                let prog_id = parse_ascom_device_id(rotator_id)?;
+
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
                         let mut rotator = AscomRotator::new(&prog_id)?;
                         rotator.move_absolute(angle)?;
-                        
+
                         // Wait for move to complete
                         while rotator.is_moving()? {
                             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1919,7 +1919,7 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if rotator_id.starts_with("ascom:") {
-                let prog_id = rotator_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+                let prog_id = parse_ascom_device_id(rotator_id)?;
 
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
@@ -1968,7 +1968,7 @@ impl DeviceOps for RealDeviceOps {
         #[cfg(windows)]
         {
             if rotator_id.starts_with("ascom:") {
-                let prog_id = rotator_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+                let prog_id = parse_ascom_device_id(rotator_id)?;
 
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
@@ -1993,11 +1993,11 @@ impl DeviceOps for RealDeviceOps {
 
     async fn rotator_halt(&self, rotator_id: &str) -> DeviceResult<()> {
         tracing::info!("Halting rotator {}", rotator_id);
-        
+
         #[cfg(windows)]
         {
             if rotator_id.starts_with("ascom:") {
-                let prog_id = rotator_id.strip_prefix("ascom:").ok_or("Invalid ASCOM ID")?.to_string();
+                let prog_id = parse_ascom_device_id(rotator_id)?;
                 return tokio::task::spawn_blocking(move || {
                     nightshade_ascom::init_com().map_err(|e| format!("COM init failed: {}", e))?;
                     let result = (|| {
