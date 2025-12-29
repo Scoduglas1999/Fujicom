@@ -134,6 +134,62 @@ impl RealDeviceOps {
         }
     }
 
+    // =========================================================================
+    // CONNECTION STATE VALIDATION
+    // =========================================================================
+
+    /// Validate that a device is connected before performing an operation.
+    ///
+    /// This check should be called before long-running operations (exposures, slews)
+    /// or operations that could damage equipment if the device state is wrong.
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID to check
+    /// * `operation` - Description of the operation (for error messages)
+    ///
+    /// # Returns
+    /// * `Ok(())` if the device is connected
+    /// * `Err(String)` with a clear "device disconnected" error if not connected
+    async fn validate_connection(&self, device_id: &str, operation: &str) -> DeviceResult<()> {
+        // Check connection state in DeviceManager
+        if !self.device_manager.is_connected(device_id).await {
+            let error_msg = format!(
+                "Device '{}' is not connected. Cannot perform: {}. Please reconnect the device first.",
+                device_id, operation
+            );
+            tracing::warn!("{}", error_msg);
+            return Err(error_msg);
+        }
+        Ok(())
+    }
+
+    /// Validate connection for a device type from the equipment profile.
+    ///
+    /// This is a convenience method that looks up the device ID from the profile
+    /// and then validates its connection state.
+    ///
+    /// # Arguments
+    /// * `device_type` - The type of device to validate
+    /// * `operation` - Description of the operation (for error messages)
+    ///
+    /// # Returns
+    /// * `Ok(device_id)` if the device is connected, returning the device ID
+    /// * `Err(String)` if the device is not configured or not connected
+    async fn validate_profile_device_connection(
+        &self,
+        device_type: crate::device::DeviceType,
+        operation: &str,
+    ) -> DeviceResult<String> {
+        let device_id = self.get_device_id_async(device_type).await
+            .ok_or_else(|| format!(
+                "No {} configured in equipment profile. Cannot perform: {}",
+                device_type.as_str(), operation
+            ))?;
+
+        self.validate_connection(&device_id, operation).await?;
+        Ok(device_id)
+    }
+
     /// Update the cached profile
     /// Call this when the equipment profile changes
     pub async fn update_cached_profile(&self) {
@@ -358,6 +414,10 @@ impl DeviceOps for RealDeviceOps {
     async fn mount_slew_to_coordinates(&self, mount_id: &str, ra_hours: f64, dec_degrees: f64) -> DeviceResult<()> {
         tracing::info!("Slewing mount {} to RA={:.4}h, Dec={:.4}°", mount_id, ra_hours, dec_degrees);
 
+        // Validate mount is connected before starting a slew
+        // Slewing is a long-running operation that could damage equipment if state is wrong
+        self.validate_connection(mount_id, &format!("slew to RA={:.4}h Dec={:.4}°", ra_hours, dec_degrees)).await?;
+
         #[cfg(windows)]
         {
             // Try ASCOM first
@@ -446,6 +506,10 @@ impl DeviceOps for RealDeviceOps {
     }
 
     async fn mount_sync(&self, mount_id: &str, ra_hours: f64, dec_degrees: f64) -> DeviceResult<()> {
+        // Validate mount is connected before syncing
+        // Syncing with wrong state could corrupt mount's coordinate system
+        self.validate_connection(mount_id, &format!("sync to RA={:.4}h Dec={:.4}°", ra_hours, dec_degrees)).await?;
+
         #[cfg(windows)]
         {
             if mount_id.starts_with("ascom:") {
@@ -485,6 +549,10 @@ impl DeviceOps for RealDeviceOps {
 
     async fn mount_park(&self, mount_id: &str) -> DeviceResult<()> {
         tracing::info!("Parking mount {}", mount_id);
+
+        // Validate mount is connected before parking
+        // Parking is a long-running operation that moves the mount
+        self.validate_connection(mount_id, "park mount").await?;
 
         #[cfg(windows)]
         {
@@ -842,7 +910,11 @@ impl DeviceOps for RealDeviceOps {
         tracing::info!(
             duration_secs, camera_id, gain, offset, bin_x, bin_y
         );
-        
+
+        // Validate camera is connected before starting a potentially long exposure
+        // This prevents wasted time and confusing errors if the camera silently disconnected
+        self.validate_connection(camera_id, &format!("start {}s exposure", duration_secs)).await?;
+
         // 1. Get current filter name if a filter wheel is connected
         let filter_name = if let Some(fw_id) = self.get_device_id(crate::device::DeviceType::FilterWheel) {
             match self.filterwheel_get_position(&fw_id).await {
@@ -1468,6 +1540,10 @@ impl DeviceOps for RealDeviceOps {
     async fn focuser_move_to(&self, focuser_id: &str, position: i32) -> DeviceResult<()> {
         tracing::info!("Moving focuser {} to position {}", focuser_id, position);
 
+        // Validate focuser is connected before moving
+        // Focuser moves are critical for autofocus and can affect image quality if state is wrong
+        self.validate_connection(focuser_id, &format!("move to position {}", position)).await?;
+
         #[cfg(windows)]
         {
             if focuser_id.starts_with("ascom:") {
@@ -1700,6 +1776,10 @@ impl DeviceOps for RealDeviceOps {
     async fn filterwheel_set_position(&self, fw_id: &str, position: i32) -> DeviceResult<()> {
         tracing::info!("Setting filter wheel {} to position {}", fw_id, position);
 
+        // Validate filter wheel is connected before changing position
+        // Filter changes affect which filter is in the optical path - important for imaging
+        self.validate_connection(fw_id, &format!("change filter to position {}", position)).await?;
+
         // Start tracking this movement for is_moving() detection
         self.start_fw_movement(fw_id, position).await;
 
@@ -1872,6 +1952,10 @@ impl DeviceOps for RealDeviceOps {
     
     async fn rotator_move_to(&self, rotator_id: &str, angle: f64) -> DeviceResult<()> {
         tracing::info!("Moving rotator {} to {}°", rotator_id, angle);
+
+        // Validate rotator is connected before moving
+        // Rotator moves affect camera orientation - important for framing
+        self.validate_connection(rotator_id, &format!("rotate to {:.1}°", angle)).await?;
 
         #[cfg(windows)]
         {
