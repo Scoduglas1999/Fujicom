@@ -1050,15 +1050,69 @@ impl Node for RuntimeNode {
             }
             NodeType::OpenDome(config) => {
                 let ctx = context.to_instruction_context().await;
-                execute_open_dome(config, &ctx).await.log_and_get_status("Open Dome")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Open Dome: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_open_dome(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Open Dome")
             }
             NodeType::CloseDome(config) => {
                 let ctx = context.to_instruction_context().await;
-                execute_close_dome(config, &ctx).await.log_and_get_status("Close Dome")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Close Dome: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_close_dome(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Close Dome")
             }
             NodeType::ParkDome(config) => {
                 let ctx = context.to_instruction_context().await;
-                execute_park_dome(config, &ctx).await.log_and_get_status("Park Dome")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Park Dome: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_park_dome(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Park Dome")
             }
             NodeType::Mosaic(config) => {
                 let ctx = context.to_instruction_context().await;
@@ -1070,19 +1124,91 @@ impl Node for RuntimeNode {
             }
             NodeType::OpenCover(config) => {
                 let ctx = context.to_instruction_context().await;
-                execute_open_cover(config, &ctx).await.log_and_get_status("Open Cover")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Open Cover: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_open_cover(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Open Cover")
             }
             NodeType::CloseCover(config) => {
                 let ctx = context.to_instruction_context().await;
-                execute_close_cover(config, &ctx).await.log_and_get_status("Close Cover")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Close Cover: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_close_cover(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Close Cover")
             }
             NodeType::CalibratorOn(config) => {
                 let ctx = context.to_instruction_context().await;
-                execute_calibrator_on(config, &ctx).await.log_and_get_status("Calibrator On")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Calibrator On: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_calibrator_on(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Calibrator On")
             }
             NodeType::CalibratorOff(config) => {
                 let ctx = context.to_instruction_context().await;
-                execute_calibrator_off(config, &ctx).await.log_and_get_status("Calibrator Off")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Calibrator Off: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_calibrator_off(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Calibrator Off")
             }
         };
 

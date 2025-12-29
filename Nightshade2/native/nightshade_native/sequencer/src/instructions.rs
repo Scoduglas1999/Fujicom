@@ -2608,16 +2608,30 @@ pub async fn execute_mosaic(config: &crate::MosaicConfig, _ctx: &InstructionCont
 // =============================================================================
 
 /// Execute open cover (unpark dust cap)
-pub async fn execute_open_cover(config: &crate::CoverCalibratorConfig, ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_open_cover(
+    config: &crate::CoverCalibratorConfig,
+    ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
     let device_id = match ctx.cover_calibrator_id() {
         Ok(id) => id.to_string(),
         Err(e) => return e,
     };
 
+    // Report initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Opening cover".to_string());
+    }
+
     tracing::info!("Opening cover...");
 
     if let Some(result) = ctx.check_cancelled() {
         return result;
+    }
+
+    // Report waiting progress BEFORE the async call
+    if let Some(cb) = progress_callback {
+        cb(50.0, "Waiting for cover to open".to_string());
     }
 
     // Start opening the cover
@@ -2628,22 +2642,42 @@ pub async fn execute_open_cover(config: &crate::CoverCalibratorConfig, ctx: &Ins
     // Wait for cover to reach open state with timeout
     let timeout = Duration::from_secs(config.timeout_secs as u64);
     match wait_for_cover_state(&device_id, 3, ctx, timeout).await {
-        Ok(_) => InstructionResult::success_with_message("Cover opened"),
+        Ok(_) => {
+            // Report completion
+            if let Some(cb) = progress_callback {
+                cb(100.0, "Cover open".to_string());
+            }
+            InstructionResult::success_with_message("Cover opened")
+        }
         Err(e) => InstructionResult::failure(e),
     }
 }
 
 /// Execute close cover (park dust cap)
-pub async fn execute_close_cover(config: &crate::CoverCalibratorConfig, ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_close_cover(
+    config: &crate::CoverCalibratorConfig,
+    ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
     let device_id = match ctx.cover_calibrator_id() {
         Ok(id) => id.to_string(),
         Err(e) => return e,
     };
 
+    // Report initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Closing cover".to_string());
+    }
+
     tracing::info!("Closing cover...");
 
     if let Some(result) = ctx.check_cancelled() {
         return result;
+    }
+
+    // Report waiting progress BEFORE the async call
+    if let Some(cb) = progress_callback {
+        cb(50.0, "Waiting for cover to close".to_string());
     }
 
     // Start closing the cover
@@ -2654,22 +2688,42 @@ pub async fn execute_close_cover(config: &crate::CoverCalibratorConfig, ctx: &In
     // Wait for cover to reach closed state with timeout
     let timeout = Duration::from_secs(config.timeout_secs as u64);
     match wait_for_cover_state(&device_id, 1, ctx, timeout).await {
-        Ok(_) => InstructionResult::success_with_message("Cover closed"),
+        Ok(_) => {
+            // Report completion
+            if let Some(cb) = progress_callback {
+                cb(100.0, "Cover closed".to_string());
+            }
+            InstructionResult::success_with_message("Cover closed")
+        }
         Err(e) => InstructionResult::failure(e),
     }
 }
 
 /// Execute calibrator on (turn on flat panel light)
-pub async fn execute_calibrator_on(config: &crate::CalibratorOnConfig, ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_calibrator_on(
+    config: &crate::CalibratorOnConfig,
+    ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
     let device_id = match ctx.cover_calibrator_id() {
         Ok(id) => id.to_string(),
         Err(e) => return e,
     };
 
+    // Report initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Turning on calibrator".to_string());
+    }
+
     tracing::info!("Turning calibrator on at brightness {}...", config.brightness);
 
     if let Some(result) = ctx.check_cancelled() {
         return result;
+    }
+
+    // Report waiting progress BEFORE the async call
+    if let Some(cb) = progress_callback {
+        cb(50.0, format!("Adjusting brightness to {}%", config.brightness));
     }
 
     // Turn on the calibrator at specified brightness
@@ -2684,6 +2738,10 @@ pub async fn execute_calibrator_on(config: &crate::CalibratorOnConfig, ctx: &Ins
             // Verify brightness is set correctly
             let actual_brightness = ctx.device_ops.cover_calibrator_get_brightness(&device_id).await
                 .unwrap_or(config.brightness);
+            // Report completion
+            if let Some(cb) = progress_callback {
+                cb(100.0, format!("Calibrator on at brightness {}", actual_brightness));
+            }
             InstructionResult::success_with_message(
                 format!("Calibrator on at brightness {}", actual_brightness)
             )
@@ -2693,16 +2751,30 @@ pub async fn execute_calibrator_on(config: &crate::CalibratorOnConfig, ctx: &Ins
 }
 
 /// Execute calibrator off (turn off flat panel light)
-pub async fn execute_calibrator_off(config: &crate::CoverCalibratorConfig, ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_calibrator_off(
+    config: &crate::CoverCalibratorConfig,
+    ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
     let device_id = match ctx.cover_calibrator_id() {
         Ok(id) => id.to_string(),
         Err(e) => return e,
     };
 
+    // Report initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Turning off calibrator".to_string());
+    }
+
     tracing::info!("Turning calibrator off...");
 
     if let Some(result) = ctx.check_cancelled() {
         return result;
+    }
+
+    // Report waiting progress BEFORE the async call
+    if let Some(cb) = progress_callback {
+        cb(50.0, "Waiting for calibrator to turn off".to_string());
     }
 
     // Turn off the calibrator
@@ -2713,7 +2785,13 @@ pub async fn execute_calibrator_off(config: &crate::CoverCalibratorConfig, ctx: 
     // Wait for calibrator to reach off state with timeout
     let timeout = Duration::from_secs(config.timeout_secs as u64);
     match wait_for_calibrator_state(&device_id, 1, ctx, timeout).await {
-        Ok(_) => InstructionResult::success_with_message("Calibrator off"),
+        Ok(_) => {
+            // Report completion
+            if let Some(cb) = progress_callback {
+                cb(100.0, "Calibrator off".to_string());
+            }
+            InstructionResult::success_with_message("Calibrator off")
+        }
         Err(e) => InstructionResult::failure(e),
     }
 }
