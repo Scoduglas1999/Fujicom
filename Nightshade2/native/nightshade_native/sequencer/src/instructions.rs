@@ -2434,13 +2434,32 @@ pub async fn execute_meridian_flip(
 // =============================================================================
 
 /// Execute open dome
-pub async fn execute_open_dome(config: &DomeConfig, ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_open_dome(
+    config: &DomeConfig,
+    ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
     let dome_id = match ctx.dome_id() {
         Ok(id) => id.to_string(),
         Err(e) => return e,
     };
 
+    // Report initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Opening dome shutter".to_string());
+    }
+
     tracing::info!("Opening dome shutter...");
+
+    if let Some(result) = ctx.check_cancelled() {
+        return result;
+    }
+
+    // Report waiting progress BEFORE the async call
+    if let Some(cb) = progress_callback {
+        cb(50.0, "Waiting for shutter to open".to_string());
+    }
+
     if let Err(e) = ctx.device_ops.dome_open(&dome_id).await {
         return InstructionResult::failure(format!("Failed to open dome: {}", e));
     }
@@ -2450,41 +2469,97 @@ pub async fn execute_open_dome(config: &DomeConfig, ctx: &InstructionContext) ->
         // For now, just open shutter is the main action
     }
 
+    // Report completion
+    if let Some(cb) = progress_callback {
+        cb(100.0, "Dome shutter open".to_string());
+    }
+
     InstructionResult::success_with_message("Dome shutter opened")
 }
 
 /// Execute close dome
-pub async fn execute_close_dome(_config: &DomeConfig, ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_close_dome(
+    _config: &DomeConfig,
+    ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
     let dome_id = match ctx.dome_id() {
         Ok(id) => id.to_string(),
         Err(e) => return e,
     };
 
+    // Report initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Closing dome shutter".to_string());
+    }
+
     tracing::info!("Closing dome shutter...");
+
+    if let Some(result) = ctx.check_cancelled() {
+        return result;
+    }
+
+    // Report waiting progress BEFORE the async call
+    if let Some(cb) = progress_callback {
+        cb(50.0, "Waiting for shutter to close".to_string());
+    }
+
     if let Err(e) = ctx.device_ops.dome_close(&dome_id).await {
         return InstructionResult::failure(format!("Failed to close dome: {}", e));
+    }
+
+    // Report completion
+    if let Some(cb) = progress_callback {
+        cb(100.0, "Dome shutter closed".to_string());
     }
 
     InstructionResult::success_with_message("Dome shutter closed")
 }
 
 /// Execute park dome
-pub async fn execute_park_dome(config: &DomeConfig, ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_park_dome(
+    config: &DomeConfig,
+    ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
     let dome_id = match ctx.dome_id() {
         Ok(id) => id.to_string(),
         Err(e) => return e,
     };
 
+    // Report initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Parking dome".to_string());
+    }
+
+    if let Some(result) = ctx.check_cancelled() {
+        return result;
+    }
+
     if !config.shutter_only {
+        // Report waiting progress BEFORE the async call
+        if let Some(cb) = progress_callback {
+            cb(50.0, "Waiting for dome to reach park position".to_string());
+        }
+
         tracing::info!("Parking dome...");
         if let Err(e) = ctx.device_ops.dome_park(&dome_id).await {
             return InstructionResult::failure(format!("Failed to park dome: {}", e));
         }
     }
 
+    if let Some(result) = ctx.check_cancelled() {
+        return result;
+    }
+
     // Usually parking involves closing shutter too
     tracing::info!("Closing shutter (park sequence)...");
     let _ = ctx.device_ops.dome_close(&dome_id).await;
+
+    // Report completion
+    if let Some(cb) = progress_callback {
+        cb(100.0, "Dome parked".to_string());
+    }
 
     InstructionResult::success_with_message("Dome parked")
 }
