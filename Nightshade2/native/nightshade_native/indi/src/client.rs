@@ -727,6 +727,9 @@ impl IndiClient {
                     last_keepalive_ms.store(current_time_ms(), Ordering::SeqCst);
                 }
                 Ok(Ok(Event::Text(e))) => {
+                    // Reset incomplete message tracking on successful event
+                    incomplete_message_start = None;
+                    incomplete_message_bytes = 0;
                     let text = e.unescape().unwrap_or_default().to_string();
                     if !current_device.is_empty()
                         && !current_property.is_empty()

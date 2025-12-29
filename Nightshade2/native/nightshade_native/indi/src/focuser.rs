@@ -55,12 +55,13 @@ impl IndiFocuser {
 
     /// Move to absolute position with timeout
     pub async fn move_to_with_timeout(&self, position: i32, timeout: Option<Duration>) -> Result<(), String> {
-        let timeout_duration = timeout.unwrap_or_else(|| {
-            let client = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.client.read())
-            });
+        // Read config outside the closure - async-friendly
+        let timeout_duration = if let Some(t) = timeout {
+            t
+        } else {
+            let client = self.client.read().await;
             Duration::from_secs(client.timeout_config().focuser_move_timeout_secs)
-        });
+        };
 
         // Start the move
         {
@@ -93,12 +94,13 @@ impl IndiFocuser {
 
     /// Move relative with timeout (inward/outward)
     pub async fn move_relative_with_timeout(&self, steps: i32, timeout: Option<Duration>) -> Result<(), String> {
-        let timeout_duration = timeout.unwrap_or_else(|| {
-            let client = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.client.read())
-            });
+        // Read config outside the closure - async-friendly
+        let timeout_duration = if let Some(t) = timeout {
+            t
+        } else {
+            let client = self.client.read().await;
             Duration::from_secs(client.timeout_config().focuser_move_timeout_secs)
-        });
+        };
 
         // Start the move
         {

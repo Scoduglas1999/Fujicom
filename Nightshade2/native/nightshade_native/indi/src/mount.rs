@@ -51,31 +51,18 @@ impl IndiMount {
     /// Get current coordinates (RA in hours, Dec in degrees)
     pub async fn get_coordinates(&self) -> Result<(f64, f64), String> {
         let client = self.client.read().await;
-        
-        // Try J2000 coordinates first
+
+        // Try J2000 coordinates first, then fall back to EOD coordinates
         let ra = client.get_number(&self.device_name, EQUATORIAL_COORD, RA)
             .await
-            .or_else(|| {
-                // Fall back to EOD coordinates
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(
-                        client.get_number(&self.device_name, EQUATORIAL_EOD_COORD, RA)
-                    )
-                })
-            })
+            .or(client.get_number(&self.device_name, EQUATORIAL_EOD_COORD, RA).await)
             .ok_or_else(|| "RA not available".to_string())?;
-        
+
         let dec = client.get_number(&self.device_name, EQUATORIAL_COORD, DEC)
             .await
-            .or_else(|| {
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(
-                        client.get_number(&self.device_name, EQUATORIAL_EOD_COORD, DEC)
-                    )
-                })
-            })
+            .or(client.get_number(&self.device_name, EQUATORIAL_EOD_COORD, DEC).await)
             .ok_or_else(|| "Dec not available".to_string())?;
-        
+
         Ok((ra, dec))
     }
 
@@ -100,12 +87,13 @@ impl IndiMount {
         dec_degrees: f64,
         timeout: Option<Duration>,
     ) -> Result<(), String> {
-        let timeout_duration = timeout.unwrap_or_else(|| {
-            let client = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.client.read())
-            });
+        // Read config outside the closure - async-friendly
+        let timeout_duration = if let Some(t) = timeout {
+            t
+        } else {
+            let client = self.client.read().await;
             Duration::from_secs(client.timeout_config().mount_slew_timeout_secs)
-        });
+        };
 
         // Start the slew
         {

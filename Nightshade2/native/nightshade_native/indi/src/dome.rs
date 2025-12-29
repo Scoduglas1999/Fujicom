@@ -85,12 +85,13 @@ impl IndiDome {
         azimuth: f64,
         timeout: Option<Duration>,
     ) -> Result<(), String> {
-        let timeout_duration = timeout.unwrap_or_else(|| {
-            let client = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.client.read())
-            });
+        // Read config outside the closure - async-friendly
+        let timeout_duration = if let Some(t) = timeout {
+            t
+        } else {
+            let client = self.client.read().await;
             Duration::from_secs(client.timeout_config().dome_slew_timeout_secs)
-        });
+        };
 
         // Start the slew
         {
@@ -130,13 +131,14 @@ impl IndiDome {
 
     /// Open the dome shutter with timeout
     pub async fn open_shutter_with_timeout(&self, timeout: Option<Duration>) -> Result<(), String> {
-        let timeout_duration = timeout.unwrap_or_else(|| {
-            let client = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.client.read())
-            });
+        // Read config outside the closure - async-friendly
+        let timeout_duration = if let Some(t) = timeout {
+            t
+        } else {
+            let client = self.client.read().await;
             // Use dome slew timeout for shutter operations (they can be slow)
             Duration::from_secs(client.timeout_config().dome_slew_timeout_secs)
-        });
+        };
 
         // Start shutter operation
         {
@@ -154,13 +156,14 @@ impl IndiDome {
 
     /// Close the dome shutter with timeout
     pub async fn close_shutter_with_timeout(&self, timeout: Option<Duration>) -> Result<(), String> {
-        let timeout_duration = timeout.unwrap_or_else(|| {
-            let client = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(self.client.read())
-            });
+        // Read config outside the closure - async-friendly
+        let timeout_duration = if let Some(t) = timeout {
+            t
+        } else {
+            let client = self.client.read().await;
             // Use dome slew timeout for shutter operations (they can be slow)
             Duration::from_secs(client.timeout_config().dome_slew_timeout_secs)
-        });
+        };
 
         // Start shutter operation
         {
