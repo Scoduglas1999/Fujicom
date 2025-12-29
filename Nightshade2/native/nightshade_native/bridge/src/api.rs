@@ -58,6 +58,16 @@ struct DiscoveryCache {
 /// Global discovery cache
 static DISCOVERY_CACHE: OnceLock<Mutex<Option<DiscoveryCache>>> = OnceLock::new();
 
+// =============================================================================
+// Event Stream Overflow Tracking
+// =============================================================================
+
+use std::sync::atomic::AtomicU64;
+
+/// Global counter for total events dropped across all event streams.
+/// This is incremented when a receiver falls behind and events are skipped.
+static TOTAL_DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
+
 /// How long to cache ASCOM/Alpaca discovery results (60 seconds)
 const DISCOVERY_CACHE_TTL: Duration = Duration::from_secs(60);
 
@@ -155,15 +165,23 @@ pub fn api_export_logs(output_path: String) -> Result<(), NightshadeError> {
 
 /// Stream of events from the native side
 /// The Dart side should listen to this stream for UI updates
+///
+/// # Overflow Handling
+///
+/// If the Dart side falls behind in consuming events (e.g., during heavy UI work),
+/// the event stream will skip lagged events and send an `EventsDropped` notification
+/// so the Dart side knows to refresh its state. The total number of dropped events
+/// is tracked for diagnostics.
 pub async fn api_event_stream(sink: crate::frb_generated::StreamSink<NightshadeEvent>) -> anyhow::Result<()> {
-    tracing::info!("[API_EVENT_STREAM] Starting event stream function");
+    tracing::info!("[API_EVENT_STREAM] Starting event stream function (buffer size: {})",
+        crate::event::DEFAULT_EVENT_BUFFER_SIZE);
 
     let mut rx = get_state().event_bus.subscribe();
     tracing::info!("[API_EVENT_STREAM] Subscribed to event bus");
 
     // Send a ready signal so Dart knows the subscription is active
     // This prevents race conditions where events are published before we're subscribed
-    sink.add(create_event(
+    sink.add(create_event_auto_id(
         EventSeverity::Info,
         EventCategory::System,
         EventPayload::System(SystemEvent::Notification {
@@ -181,7 +199,26 @@ pub async fn api_event_stream(sink: crate::frb_generated::StreamSink<NightshadeE
                 sink.add(event);
             }
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                tracing::warn!("[API_EVENT_STREAM] Event stream lagged, missed {} events", n);
+                // Update the global dropped event counter
+                let previous_total = TOTAL_DROPPED_EVENTS.fetch_add(n, Ordering::Relaxed);
+                let new_total = previous_total + n;
+
+                tracing::warn!(
+                    "[API_EVENT_STREAM] Event stream lagged! Skipped {} events (total dropped: {}). \
+                    Consider increasing DEFAULT_EVENT_BUFFER_SIZE or optimizing Dart event handling.",
+                    n, new_total
+                );
+
+                // Send a notification to Dart so it knows events were dropped
+                // This allows the UI to refresh its state from the source of truth
+                sink.add(create_event_auto_id(
+                    EventSeverity::Warning,
+                    EventCategory::System,
+                    EventPayload::System(SystemEvent::EventsDropped {
+                        dropped_count: n,
+                        total_dropped: new_total,
+                    }),
+                ));
             }
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                 tracing::info!("[API_EVENT_STREAM] Event bus closed, stopping stream");
@@ -191,6 +228,13 @@ pub async fn api_event_stream(sink: crate::frb_generated::StreamSink<NightshadeE
     }
 
     Ok(())
+}
+
+/// Get the total number of events dropped since app start.
+/// Useful for diagnostics and monitoring event stream health.
+#[flutter_rust_bridge::frb(sync)]
+pub fn api_get_dropped_event_count() -> u64 {
+    TOTAL_DROPPED_EVENTS.load(Ordering::Relaxed)
 }
 
 // =============================================================================
@@ -2485,7 +2529,11 @@ pub async fn api_camera_start_exposure(
                 .map(|&v| v as f64 / 65535.0)
                 .collect();
             let mut sorted = rgb_pixels.clone();
-            sorted.par_sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
+            // Use unwrap_or for float comparison to handle NaN safely
+            // NaN values are treated as equal to avoid panics
+            sorted.par_sort_unstable_by(|a, b| {
+                a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+            });
             let median = sorted[sorted.len() / 2];
             let unified_params = nightshade_imaging::StretchParams {
                 shadows: (median - 0.1).max(0.0),
@@ -2737,11 +2785,13 @@ pub mod rand {
     #[flutter_rust_bridge::frb(ignore)]
     impl RandomValue for f64 {
         fn random() -> Self {
+            // Use unwrap_or with a fallback value to avoid panic
+            // SystemTime::now() can fail if system clock is set before UNIX_EPOCH
             let seed = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or(std::time::Duration::from_secs(0))
                 .as_nanos() as u64;
-            // Simple LCG
+            // Simple LCG - even with seed=0, this produces valid output
             let x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             (x as f64) / (u64::MAX as f64)
         }
@@ -2759,9 +2809,10 @@ pub mod rand {
         }
 
         pub fn gen_range<T: RandomRange>(&mut self, range: std::ops::Range<T>) -> T {
+            // Use unwrap_or with a fallback to avoid panic on clock issues
             let seed = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or(std::time::Duration::from_secs(0))
                 .as_nanos() as u64;
             self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(seed);
             T::in_range(self.state, range)
@@ -2807,9 +2858,10 @@ pub mod rand {
 
     #[flutter_rust_bridge::frb(ignore)]
     pub fn thread_rng() -> Rng {
+        // Use unwrap_or with a fallback to avoid panic on clock issues
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(std::time::Duration::from_secs(0))
             .as_nanos() as u64;
         Rng { state: seed }
     }
@@ -5660,7 +5712,13 @@ async fn run_polar_alignment(
                 emit_polar_status(&format!("Slewing to point {}...", point + 1), "measuring", point as i32);
 
                 // Calculate new position (in degrees)
-                let (current_ra_deg, current_dec) = solved_points.last().unwrap();
+                // Safe to get last() because we just pushed to solved_points above
+                let (current_ra_deg, current_dec) = match solved_points.last() {
+                    Some(coords) => coords,
+                    None => {
+                        return Err("No solved points available for slew calculation".to_string());
+                    }
+                };
                 let move_amount = if rotate_east { step_size } else { -step_size };
                 let target_ra_deg = (current_ra_deg + move_amount + 360.0) % 360.0;
 
