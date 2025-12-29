@@ -67,6 +67,16 @@ impl AlpacaFilterWheel {
         &self.client
     }
 
+    /// Get the base URL for this device
+    pub fn base_url(&self) -> &str {
+        self.client.base_url()
+    }
+
+    /// Get the device number for this device
+    pub fn device_number(&self) -> u32 {
+        self.client.device_number()
+    }
+
     // Connection methods
 
     pub async fn connect(&self) -> Result<(), String> {

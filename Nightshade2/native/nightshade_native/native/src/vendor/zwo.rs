@@ -658,12 +658,21 @@ impl NativeDevice for ZwoCamera {
         }
         tracing::debug!("Camera opened successfully");
 
+        // Create cleanup guard to close the camera if subsequent operations fail
+        let camera_id = self.camera_id;
+        let cleanup_guard = CleanupGuard::new(|| {
+            tracing::debug!("Cleaning up ZWO camera {} after failed connect", camera_id);
+            if let Some(sdk) = AsiSdk::get() {
+                let _ = unsafe { (sdk.close_camera)(camera_id) };
+            }
+        });
+
         // Initialize camera
         tracing::debug!("Initializing camera ID {}", self.camera_id);
         let result = unsafe { (sdk.init_camera)(self.camera_id) };
         if result != 0 {
             tracing::error!("ASIInitCamera failed for ID {}: ASI error code {}", self.camera_id, result);
-            unsafe { (sdk.close_camera)(self.camera_id) };
+            // cleanup_guard will handle closing the camera
             return Err(check_asi_error(result).unwrap_err());
         }
         tracing::debug!("Camera initialized successfully");
@@ -697,6 +706,9 @@ impl NativeDevice for ZwoCamera {
             self.current_offset = val as i32;
             tracing::debug!("Current offset: {}", self.current_offset);
         }
+
+        // All operations succeeded - defuse the cleanup guard
+        cleanup_guard.defuse();
 
         self.connected = true;
         tracing::info!("Successfully connected to ZWO camera: {}", self.camera_name());

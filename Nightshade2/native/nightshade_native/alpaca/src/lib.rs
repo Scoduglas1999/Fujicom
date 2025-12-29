@@ -16,8 +16,10 @@ mod safetymonitor;
 mod observingconditions;
 mod switch;
 mod covercalibrator;
+mod guard;
 
 pub use client::*;
+pub use guard::*;
 pub use discovery::*;
 pub use camera::*;
 pub use telescope::*;

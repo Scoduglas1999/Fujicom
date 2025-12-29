@@ -4502,8 +4502,7 @@ impl DeviceManager {
                 // Perform health check based on driver type
                 let health_check_result = match driver_type {
                     DriverType::Simulator => {
-                        // Simulator devices should not be connected - return unhealthy
-                        Ok(false)
+                        Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
                     }
                     DriverType::Alpaca => {
                         // For Alpaca, we could ping the device
