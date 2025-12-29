@@ -165,13 +165,59 @@ impl AlpacaFocuser {
     // Movement commands
 
     /// Move the focuser to an absolute position
+    /// Note: This uses standard timeout. For long moves, use move_to_typed() instead.
     pub async fn move_to(&self, position: i32) -> Result<(), String> {
         self.client.put("move", &[("Position", &position.to_string())]).await
+    }
+
+    /// Move the focuser to an absolute position with long timeout
+    /// Uses extended timeout appropriate for focuser operations that may take
+    /// significant time, especially for full travel moves on slow focusers.
+    pub async fn move_to_typed(&self, position: i32) -> Result<(), AlpacaError> {
+        self.client.put_long("move", &[("Position", &position.to_string())]).await
     }
 
     /// Halt any focuser motion
     pub async fn halt(&self) -> Result<(), String> {
         self.client.put("halt", &[]).await
+    }
+
+    /// Wait for the focuser to complete its current move operation
+    /// Returns Ok(true) if move completed, Ok(false) if timeout reached
+    pub async fn wait_for_move_complete(
+        &self,
+        poll_interval: std::time::Duration,
+        timeout: std::time::Duration,
+    ) -> Result<bool, AlpacaError> {
+        let deadline = std::time::Instant::now() + timeout;
+
+        loop {
+            match self.is_moving().await {
+                Ok(false) => return Ok(true),
+                Ok(true) => {
+                    if std::time::Instant::now() >= deadline {
+                        return Ok(false);
+                    }
+                    tokio::time::sleep(poll_interval).await;
+                }
+                Err(e) => return Err(AlpacaError::OperationFailed(e)),
+            }
+        }
+    }
+
+    /// Move focuser to position and wait for completion
+    /// Initiates the move and polls until complete or timeout
+    /// Returns Ok(true) if move completed successfully, Ok(false) if timeout reached
+    pub async fn move_to_and_wait(
+        &self,
+        position: i32,
+        poll_interval: std::time::Duration,
+        timeout: std::time::Duration,
+    ) -> Result<bool, AlpacaError> {
+        // Initiate the move with long timeout
+        self.move_to_typed(position).await?;
+        // Wait for completion
+        self.wait_for_move_complete(poll_interval, timeout).await
     }
 
     // Parallel status methods
