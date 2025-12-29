@@ -1,5 +1,5 @@
 //! Three-Point Polar Alignment implementation
-//! 
+//!
 //! This module implements the logic for Three-Point Polar Alignment (TPPA).
 //! It captures three images at different mount rotations to calculate the
 //! mechanical center of rotation, and then determines the polar alignment error.
@@ -7,6 +7,13 @@
 use crate::*;
 use std::time::Duration;
 use tokio::time::sleep;
+
+// Image processing imports for live display
+use nightshade_imaging::{
+    ImageData, BayerPattern, DebayerAlgorithm,
+    debayer, auto_stretch_stf, apply_stretch,
+    auto_stretch_rgb, apply_stretch_rgb,
+};
 
 /// Configuration for polar alignment
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -304,6 +311,88 @@ fn calculate_center_of_rotation(points: &[(f64, f64)]) -> (f64, f64) {
     let center_dec = center_dec_rad.to_degrees();
 
     (center_ra, center_dec)
+}
+
+/// Prepare image data for display by applying debayering (if color) and stretching,
+/// then encoding to JPEG format for efficient transmission to the UI.
+///
+/// # Arguments
+/// * `image_data` - The raw image data from the camera
+/// * `is_color` - Whether this is a color camera (requires debayering)
+/// * `bayer_pattern` - Optional bayer pattern for color cameras (defaults to RGGB)
+///
+/// # Returns
+/// JPEG-encoded bytes suitable for display, or an error message
+pub fn prepare_image_for_display(
+    image_data: &ImageData,
+    is_color: bool,
+    bayer_pattern: Option<BayerPattern>,
+) -> Result<Vec<u8>, String> {
+    use image::ImageEncoder;
+
+    let (display_data, width, height, color_type) = if is_color {
+        // Color camera: debayer then stretch
+        let pattern = bayer_pattern.unwrap_or(BayerPattern::RGGB);
+
+        // Debayer the raw data to get RGB image
+        let rgb_image = debayer(
+            &image_data.data,
+            image_data.width,
+            image_data.height,
+            pattern,
+            DebayerAlgorithm::Bilinear, // Fast algorithm for live preview
+        );
+
+        // Get interleaved RGB16 data for stretching
+        let rgb16_data = rgb_image.to_rgb16();
+
+        // Calculate auto-stretch parameters for RGB
+        // Use linked stretch (same params for all channels) for natural color balance
+        let (_r_params, g_params, _b_params) = auto_stretch_rgb(
+            &rgb16_data,
+            rgb_image.width,
+            rgb_image.height,
+        );
+
+        // Use green channel params as reference for linked stretch
+        // (green is most representative of luminosity in astro images)
+        let stretched = apply_stretch_rgb(
+            &rgb16_data,
+            rgb_image.width,
+            rgb_image.height,
+            &g_params,
+        );
+
+        (
+            stretched,
+            rgb_image.width,
+            rgb_image.height,
+            image::ColorType::Rgb8,
+        )
+    } else {
+        // Mono camera: just stretch
+        let params = auto_stretch_stf(image_data);
+        let stretched = apply_stretch(image_data, &params);
+
+        (
+            stretched,
+            image_data.width,
+            image_data.height,
+            image::ColorType::L8,
+        )
+    };
+
+    // Encode to JPEG
+    let mut jpeg_data = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut jpeg_data);
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 85);
+        encoder
+            .write_image(&display_data, width, height, color_type)
+            .map_err(|e| format!("Failed to encode JPEG: {}", e))?;
+    }
+
+    Ok(jpeg_data)
 }
 
 #[cfg(test)]

@@ -1,0 +1,21 @@
+[package]
+name = "nightshade_sequencer"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+image.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+rand = "0.8"
+base64 = "0.22"
+nightshade_imaging = { path = "../imaging" }
+
