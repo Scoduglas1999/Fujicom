@@ -301,28 +301,35 @@ impl DeviceOps for RealDeviceOps {
         if mount_id.starts_with("alpaca:") {
             let id_str = mount_id.strip_prefix("alpaca:").unwrap_or("");
             let parts: Vec<&str> = id_str.split(':').collect();
-            
+
             if parts.len() >= 5 {
                 let protocol = parts[0];
                 let host_part = parts[1].trim_start_matches("//");
                 let port = parts[2];
                 let _device_type = parts[3];
                 let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
+
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                mount.set_target_right_ascension(ra_hours).await?;
-                mount.set_target_declination(dec_degrees).await?;
-                mount.slew_to_target().await?;
-                
-                // Wait for slew to complete
-                while mount.slewing().await? {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                }
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_slew_to_coordinates", async {
+                    mount.set_target_right_ascension(ra_hours).await.map_err(|e| e.to_string())?;
+                    mount.set_target_declination(dec_degrees).await.map_err(|e| e.to_string())?;
+                    mount.slew_to_target().await.map_err(|e| e.to_string())?;
+
+                    // Wait for slew to complete
+                    while mount.slewing().await.map_err(|e| e.to_string())? {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                    Ok::<(), String>(())
+                }).await;
+
+                // Always try to disconnect after successful operation
                 mount.disconnect().await.ok();
-                
-                return Ok(());
+
+                return result;
             }
         }
         
@@ -352,26 +359,32 @@ impl DeviceOps for RealDeviceOps {
         if mount_id.starts_with("alpaca:") {
             let id_str = mount_id.strip_prefix("alpaca:").unwrap_or("");
             let parts: Vec<&str> = id_str.split(':').collect();
-            
+
             if parts.len() >= 5 {
                 let protocol = parts[0];
                 let host_part = parts[1].trim_start_matches("//");
                 let port = parts[2];
                 let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
+
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                let ra = mount.right_ascension().await?;
-                let dec = mount.declination().await?;
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_get_coordinates", async {
+                    let ra = mount.right_ascension().await.map_err(|e| e.to_string())?;
+                    let dec = mount.declination().await.map_err(|e| e.to_string())?;
+                    Ok::<(f64, f64), String>((ra, dec))
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok((ra, dec));
+                return result;
             }
         }
-        
+
         Err(format!("Mount {} not found or unsupported", mount_id))
     }
-    
+
     async fn mount_sync(&self, mount_id: &str, ra_hours: f64, dec_degrees: f64) -> DeviceResult<()> {
         #[cfg(windows)]
         {
@@ -394,27 +407,33 @@ impl DeviceOps for RealDeviceOps {
         if mount_id.starts_with("alpaca:") {
             let id_str = mount_id.strip_prefix("alpaca:").unwrap_or("");
             let parts: Vec<&str> = id_str.split(':').collect();
-            
+
             if parts.len() >= 5 {
                 let protocol = parts[0];
                 let host_part = parts[1].trim_start_matches("//");
                 let port = parts[2];
                 let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
+
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                mount.set_target_right_ascension(ra_hours).await?;
-                mount.set_target_declination(dec_degrees).await?;
-                mount.sync_to_target().await?;
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_sync", async {
+                    mount.set_target_right_ascension(ra_hours).await.map_err(|e| e.to_string())?;
+                    mount.set_target_declination(dec_degrees).await.map_err(|e| e.to_string())?;
+                    mount.sync_to_target().await.map_err(|e| e.to_string())?;
+                    Ok::<(), String>(())
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(());
+                return result;
             }
         }
-        
+
         Err(format!("Mount {} not found or unsupported", mount_id))
     }
-    
+
     async fn mount_park(&self, mount_id: &str) -> DeviceResult<()> {
         tracing::info!("Parking mount {}", mount_id);
         
@@ -439,30 +458,36 @@ impl DeviceOps for RealDeviceOps {
         if mount_id.starts_with("alpaca:") {
             let id_str = mount_id.strip_prefix("alpaca:").unwrap_or("");
             let parts: Vec<&str> = id_str.split(':').collect();
-            
+
             if parts.len() >= 5 {
                 let protocol = parts[0];
                 let host_part = parts[1].trim_start_matches("//");
                 let port = parts[2];
                 let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
+
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                mount.park().await?;
-                
-                // Wait for park to complete
-                while mount.slewing().await? {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                }
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_park", async {
+                    mount.park().await.map_err(|e| e.to_string())?;
+
+                    // Wait for park to complete
+                    while mount.slewing().await.map_err(|e| e.to_string())? {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    }
+                    Ok::<(), String>(())
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(());
+                return result;
             }
         }
-        
+
         Err(format!("Mount {} not found or unsupported", mount_id))
     }
-    
+
     async fn mount_unpark(&self, mount_id: &str) -> DeviceResult<()> {
         tracing::info!("Unparking mount {}", mount_id);
         
@@ -487,25 +512,31 @@ impl DeviceOps for RealDeviceOps {
         if mount_id.starts_with("alpaca:") {
             let id_str = mount_id.strip_prefix("alpaca:").unwrap_or("");
             let parts: Vec<&str> = id_str.split(':').collect();
-            
+
             if parts.len() >= 5 {
                 let protocol = parts[0];
                 let host_part = parts[1].trim_start_matches("//");
                 let port = parts[2];
                 let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
+
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                mount.unpark().await?;
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_unpark", async {
+                    mount.unpark().await.map_err(|e| e.to_string())?;
+                    Ok::<(), String>(())
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(());
+                return result;
             }
         }
-        
+
         Err(format!("Mount {} not found or unsupported", mount_id))
     }
-    
+
     async fn mount_is_slewing(&self, mount_id: &str) -> DeviceResult<bool> {
         #[cfg(windows)]
         {
@@ -527,25 +558,31 @@ impl DeviceOps for RealDeviceOps {
         if mount_id.starts_with("alpaca:") {
             let id_str = mount_id.strip_prefix("alpaca:").unwrap_or("");
             let parts: Vec<&str> = id_str.split(':').collect();
-            
+
             if parts.len() >= 5 {
                 let protocol = parts[0];
                 let host_part = parts[1].trim_start_matches("//");
                 let port = parts[2];
                 let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
+
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                let slewing = mount.slewing().await?;
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_is_slewing", async {
+                    let slewing = mount.slewing().await.map_err(|e| e.to_string())?;
+                    Ok::<bool, String>(slewing)
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(slewing);
+                return result;
             }
         }
-        
+
         Err(format!("Mount {} not found or unsupported", mount_id))
     }
-    
+
     async fn mount_is_parked(&self, mount_id: &str) -> DeviceResult<bool> {
         #[cfg(windows)]
         {
@@ -567,22 +604,28 @@ impl DeviceOps for RealDeviceOps {
         if mount_id.starts_with("alpaca:") {
             let id_str = mount_id.strip_prefix("alpaca:").unwrap_or("");
             let parts: Vec<&str> = id_str.split(':').collect();
-            
+
             if parts.len() >= 5 {
                 let protocol = parts[0];
                 let host_part = parts[1].trim_start_matches("//");
                 let port = parts[2];
                 let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
+
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                let parked = mount.at_park().await?;
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_is_parked", async {
+                    let parked = mount.at_park().await.map_err(|e| e.to_string())?;
+                    Ok::<bool, String>(parked)
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(parked);
+                return result;
             }
         }
-        
+
         Err(format!("Mount {} not found or unsupported", mount_id))
     }
 
@@ -618,9 +661,15 @@ impl DeviceOps for RealDeviceOps {
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                let can_flip = mount.can_slew().await.unwrap_or(true);
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_can_flip", async {
+                    let can_flip = mount.can_slew().await.unwrap_or(true);
+                    Ok::<bool, String>(can_flip)
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(can_flip);
+                return result;
             }
         }
 
@@ -664,13 +713,19 @@ impl DeviceOps for RealDeviceOps {
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                let side = mount.side_of_pier().await.unwrap_or(nightshade_alpaca::PierSide::Unknown);
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_side_of_pier", async {
+                    let side = mount.side_of_pier().await.unwrap_or(nightshade_alpaca::PierSide::Unknown);
+                    Ok::<nightshade_sequencer::meridian::PierSide, String>(match side {
+                        nightshade_alpaca::PierSide::East => nightshade_sequencer::meridian::PierSide::East,
+                        nightshade_alpaca::PierSide::West => nightshade_sequencer::meridian::PierSide::West,
+                        nightshade_alpaca::PierSide::Unknown => nightshade_sequencer::meridian::PierSide::Unknown,
+                    })
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(match side {
-                    nightshade_alpaca::PierSide::East => nightshade_sequencer::meridian::PierSide::East,
-                    nightshade_alpaca::PierSide::West => nightshade_sequencer::meridian::PierSide::West,
-                    nightshade_alpaca::PierSide::Unknown => nightshade_sequencer::meridian::PierSide::Unknown,
-                });
+                return result;
             }
         }
 
@@ -708,9 +763,15 @@ impl DeviceOps for RealDeviceOps {
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                let tracking = mount.tracking().await?;
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_is_tracking", async {
+                    let tracking = mount.tracking().await.map_err(|e| e.to_string())?;
+                    Ok::<bool, String>(tracking)
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(tracking);
+                return result;
             }
         }
 
@@ -751,9 +812,15 @@ impl DeviceOps for RealDeviceOps {
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                mount.set_tracking(enabled).await?;
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_set_tracking", async {
+                    mount.set_tracking(enabled).await.map_err(|e| e.to_string())?;
+                    Ok::<(), String>(())
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(());
+                return result;
             }
         }
 
@@ -784,25 +851,31 @@ impl DeviceOps for RealDeviceOps {
         if mount_id.starts_with("alpaca:") {
             let id_str = mount_id.strip_prefix("alpaca:").unwrap_or("");
             let parts: Vec<&str> = id_str.split(':').collect();
-            
+
             if parts.len() >= 5 {
                 let protocol = parts[0];
                 let host_part = parts[1].trim_start_matches("//");
                 let port = parts[2];
                 let device_num: u32 = parts[4].parse().unwrap_or(0);
-                
+
                 let base_url = format!("{}://{}:{}", protocol, host_part, port);
                 let mount = AlpacaTelescope::from_server(&base_url, device_num);
                 mount.connect().await?;
-                mount.abort_slew().await?;
+
+                // Use guard to ensure disconnect on any error
+                let result = with_alpaca_connection(&mount, "mount_abort_slew", async {
+                    mount.abort_slew().await.map_err(|e| e.to_string())?;
+                    Ok::<(), String>(())
+                }).await;
+
                 mount.disconnect().await.ok();
-                return Ok(());
+                return result;
             }
         }
-        
+
         Err(format!("Mount {} not found or unsupported", mount_id))
     }
-    
+
     // =========================================================================
     // CAMERA OPERATIONS
     // =========================================================================
