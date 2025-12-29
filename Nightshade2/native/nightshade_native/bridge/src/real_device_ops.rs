@@ -971,10 +971,9 @@ impl DeviceOps for RealDeviceOps {
         
         if camera_id.starts_with("indi:") {
             if let Some(client) = self.device_manager.get_indi_client(camera_id).await {
-                // Parse device name from ID
-                let parts: Vec<&str> = camera_id.split(':').collect();
-                let device_name = parts[3..].join(":");
-                
+                // Parse device name from ID using safe parser
+                let (_, _, device_name) = parse_indi_device_id(camera_id)?;
+
                 let camera = IndiCamera::new(client, &device_name);
                 
                 // Set parameters
@@ -1300,24 +1299,18 @@ impl DeviceOps for RealDeviceOps {
         
         if camera_id.starts_with("indi:") {
             if let Some(client) = self.device_manager.get_indi_client(camera_id).await {
-                let parts: Vec<&str> = camera_id.split(':').collect();
-                let device_name = parts[3..].join(":");
+                let (_, _, device_name) = parse_indi_device_id(camera_id)?;
                 let camera = IndiCamera::new(client, &device_name);
                 camera.abort_exposure().await?;
                 return Ok(());
             }
         }
-        
-        if camera_id.starts_with("alpaca:") {
-            let parts: Vec<&str> = camera_id.split(':').collect();
-            if parts.len() >= 3 {
-                let base_url = parts[1];
-                let device_number: u32 = parts[2].parse().map_err(|e| format!("Invalid device number: {}", e))?;
 
-                let camera = AlpacaCamera::from_server(base_url, device_number);
-                camera.abort_exposure().await?;
-                return Ok(());
-            }
+        if camera_id.starts_with("alpaca:") {
+            let info = parse_alpaca_device_id(camera_id)?;
+            let camera = AlpacaCamera::from_server(&info.base_url, info.device_num);
+            camera.abort_exposure().await?;
+            return Ok(());
         }
 
         // Native camera support
@@ -1356,26 +1349,20 @@ impl DeviceOps for RealDeviceOps {
         
         if camera_id.starts_with("indi:") {
             if let Some(client) = self.device_manager.get_indi_client(camera_id).await {
-                let parts: Vec<&str> = camera_id.split(':').collect();
-                let device_name = parts[3..].join(":");
+                let (_, _, device_name) = parse_indi_device_id(camera_id)?;
                 let camera = IndiCamera::new(client, &device_name);
                 camera.set_cooler(enabled).await?;
                 camera.set_temperature(target_temp).await?;
                 return Ok(());
             }
         }
-        
-        if camera_id.starts_with("alpaca:") {
-            let parts: Vec<&str> = camera_id.split(':').collect();
-            if parts.len() >= 3 {
-                let base_url = parts[1];
-                let device_number: u32 = parts[2].parse().map_err(|e| format!("Invalid device number: {}", e))?;
 
-                let camera = AlpacaCamera::from_server(base_url, device_number);
-                camera.set_ccd_temperature(target_temp).await?;
-                camera.set_cooler_on(enabled).await?;
-                return Ok(());
-            }
+        if camera_id.starts_with("alpaca:") {
+            let info = parse_alpaca_device_id(camera_id)?;
+            let camera = AlpacaCamera::from_server(&info.base_url, info.device_num);
+            camera.set_ccd_temperature(target_temp).await?;
+            camera.set_cooler_on(enabled).await?;
+            return Ok(());
         }
 
         // Native camera support
@@ -1410,22 +1397,16 @@ impl DeviceOps for RealDeviceOps {
         
         if camera_id.starts_with("indi:") {
             if let Some(client) = self.device_manager.get_indi_client(camera_id).await {
-                let parts: Vec<&str> = camera_id.split(':').collect();
-                let device_name = parts[3..].join(":");
+                let (_, _, device_name) = parse_indi_device_id(camera_id)?;
                 let camera = IndiCamera::new(client, &device_name);
-                return camera.get_temperature().await.map_err(|e| e);
+                return camera.get_temperature().await;
             }
         }
-        
-        if camera_id.starts_with("alpaca:") {
-            let parts: Vec<&str> = camera_id.split(':').collect();
-            if parts.len() >= 3 {
-                let base_url = parts[1];
-                let device_number: u32 = parts[2].parse().map_err(|e| format!("Invalid device number: {}", e))?;
 
-                let camera = AlpacaCamera::from_server(base_url, device_number);
-                return Ok(camera.ccd_temperature().await?);
-            }
+        if camera_id.starts_with("alpaca:") {
+            let info = parse_alpaca_device_id(camera_id)?;
+            let camera = AlpacaCamera::from_server(&info.base_url, info.device_num);
+            return Ok(camera.ccd_temperature().await?);
         }
 
         // Native camera support
@@ -1464,14 +1445,9 @@ impl DeviceOps for RealDeviceOps {
         }
         
         if camera_id.starts_with("alpaca:") {
-            let parts: Vec<&str> = camera_id.split(':').collect();
-            if parts.len() >= 3 {
-                let base_url = parts[1];
-                let device_number: u32 = parts[2].parse().map_err(|e| format!("Invalid device number: {}", e))?;
-
-                let camera = AlpacaCamera::from_server(base_url, device_number);
-                return Ok(camera.cooler_power().await?);
-            }
+            let info = parse_alpaca_device_id(camera_id)?;
+            let camera = AlpacaCamera::from_server(&info.base_url, info.device_num);
+            return Ok(camera.cooler_power().await?);
         }
 
         // Native camera support
