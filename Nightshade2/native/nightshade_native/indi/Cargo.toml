@@ -1,0 +1,19 @@
+[package]
+name = "nightshade_indi"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+
+# XML parsing for INDI protocol
+quick-xml = { version = "0.31", features = ["async-tokio"] }
+base64 = "0.21"
+
+# mDNS discovery
+mdns-sd = "0.11"
