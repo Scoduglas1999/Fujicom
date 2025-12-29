@@ -506,11 +506,9 @@ impl DeviceManager {
         result
     }
     
-    /// Connect to a simulator device
+    /// Connect to a simulator device - DISABLED
     async fn connect_simulator(&self, _info: &DeviceInfo) -> Result<(), String> {
-        // Simulate connection delay
-        tokio::time::sleep(Duration::from_millis(300)).await;
-        Ok(())
+        Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
     }
     
     /// Connect to an ASCOM device
@@ -1149,7 +1147,8 @@ impl DeviceManager {
                 // The client manages device connections internally
             }
             DriverType::Simulator => {
-                // Simulators don't need cleanup - they're virtual
+                // Simulators should never be connected - connection is disabled
+                // No cleanup needed even if this is somehow reached
             }
         }
 
@@ -1502,10 +1501,7 @@ impl DeviceManager {
                 Err(format!("Native SDK camera {} not found", device_id))
             }
             Some(DriverType::Simulator) => {
-                tracing::info!("DeviceManager: Simulating exposure for {}", device_id);
-                // Simulator just waits for the duration
-                tokio::time::sleep(std::time::Duration::from_secs_f64(duration)).await;
-                Ok(())
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             None => Err(format!("Device {} not found", device_id)),
         }
@@ -1561,8 +1557,7 @@ impl DeviceManager {
                 Err(format!("INDI camera {} not found", device_id))
             }
             Some(DriverType::Simulator) => {
-                // Simulator exposure is always "complete" since we waited in start_exposure
-                Ok(true)
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             Some(DriverType::Native) => {
                 let native_cameras = self.native_cameras.read().await;
@@ -1771,29 +1766,7 @@ impl DeviceManager {
                 Err(format!("INDI camera {} not found", device_id))
             }
             Some(DriverType::Simulator) => {
-                // Return a simulated image
-                let width = 1920u32;
-                let height = 1080u32;
-                let data: Vec<u16> = vec![1000u16; (width * height) as usize];
-                Ok(ImageData {
-                    width,
-                    height,
-                    data,
-                    bits_per_pixel: 16,
-                    bayer_pattern: None,
-                    metadata: nightshade_native::camera::ImageMetadata {
-                        exposure_time: 1.0,
-                        gain: 100,
-                        offset: 10,
-                        bin_x: 1,
-                        bin_y: 1,
-                        temperature: Some(-10.0),
-                        timestamp: chrono::Utc::now(),
-                        subframe: None,
-                        readout_mode: None,
-                        vendor_data: nightshade_native::camera::VendorFeatures::default(),
-                    },
-                })
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             Some(DriverType::Native) => {
                 let mut native_cameras = self.native_cameras.write().await;
@@ -1856,8 +1829,7 @@ impl DeviceManager {
                 Err(format!("INDI camera {} not found", device_id))
             }
             Some(DriverType::Simulator) => {
-                // Simulator doesn't need abort
-                Ok(())
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             Some(DriverType::Native) => {
                 let mut native_cameras = self.native_cameras.write().await;
@@ -1970,26 +1942,7 @@ impl DeviceManager {
                 Err(format!("Alpaca camera {} not found", device_id))
             }
             Some(DriverType::Simulator) => {
-                Ok(crate::device::CameraStatus {
-                    connected: true,
-                    state: crate::device::CameraState::Idle,
-                    sensor_temp: Some(-10.0),
-                    cooler_power: Some(50.0),
-                    target_temp: Some(-10.0),
-                    cooler_on: true,
-                    gain: 100,
-                    offset: 10,
-                    bin_x: 1,
-                    bin_y: 1,
-                    sensor_width: 1920,
-                    sensor_height: 1080,
-                    pixel_size_x: 3.76,
-                    pixel_size_y: 3.76,
-                    max_adu: 65535,
-                    can_cool: true,
-                    can_set_gain: true,
-                    can_set_offset: true,
-                })
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
             Some(DriverType::Native) => {
                 let native_cameras = self.native_cameras.read().await;
@@ -2121,7 +2074,9 @@ impl DeviceManager {
                 }
                 Err(format!("Native SDK camera {} not found", device_id))
             }
-            Some(DriverType::Simulator) => Ok(()),
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err(format!("Camera {} not found or not supported", device_id)),
         }
     }
@@ -2161,7 +2116,9 @@ impl DeviceManager {
                 }
                 Err(format!("Native SDK camera {} not found", device_id))
             }
-            Some(DriverType::Simulator) => Ok(()),
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err(format!("Camera {} not found or not supported", device_id)),
         }
     }
@@ -2229,7 +2186,9 @@ impl DeviceManager {
                 }
                 Err(format!("Native SDK camera {} not found", device_id))
             }
-            Some(DriverType::Simulator) => Ok(()),
+            Some(DriverType::Simulator) => {
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
+            }
             _ => Err("Not implemented for this driver type".to_string()),
         }
     }
@@ -2316,8 +2275,7 @@ impl DeviceManager {
                 Err("Native mount not connected".to_string())
             }
             DriverType::Simulator => {
-                tracing::info!("mount_slew: Simulator mount slewing to RA={}, Dec={}", ra, dec);
-                Ok(())
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
         }
     }
@@ -2368,8 +2326,7 @@ impl DeviceManager {
                 Err("Native mount not connected".to_string())
             }
             DriverType::Simulator => {
-                tracing::info!("mount_sync: Simulator syncing to RA={}, Dec={}", ra, dec);
-                Ok(())
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
         }
     }
@@ -2420,8 +2377,7 @@ impl DeviceManager {
                 Err("Native mount not connected".to_string())
             }
             DriverType::Simulator => {
-                tracing::info!("mount_park: Simulator mount parking");
-                Ok(())
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
         }
     }
@@ -2472,8 +2428,7 @@ impl DeviceManager {
                 Err("Native mount not connected".to_string())
             }
             DriverType::Simulator => {
-                tracing::info!("mount_unpark: Simulator mount unparking");
-                Ok(())
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
         }
     }
@@ -2953,8 +2908,7 @@ impl DeviceManager {
                 Err("Native SDK does not support mount axis movement".to_string())
             }
             DriverType::Simulator => {
-                tracing::info!("mount_move_axis: Simulator mount moving axis {} at rate {}", axis, rate);
-                Ok(())
+                Err("Simulator devices are disabled. Connect real hardware or use INDI/ASCOM/Alpaca simulators for testing.".to_string())
             }
         }
     }
@@ -4548,8 +4502,8 @@ impl DeviceManager {
                 // Perform health check based on driver type
                 let health_check_result = match driver_type {
                     DriverType::Simulator => {
-                        // Simulators are always healthy
-                        Ok(true)
+                        // Simulator devices should not be connected - return unhealthy
+                        Ok(false)
                     }
                     DriverType::Alpaca => {
                         // For Alpaca, we could ping the device
