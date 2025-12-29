@@ -826,11 +826,47 @@ impl Node for RuntimeNode {
             }
             NodeType::StartGuiding(config) => {
                 let ctx = context.to_instruction_context().await;
-                execute_start_guiding(config, &ctx).await.log_and_get_status("Start Guiding")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Start Guiding: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_start_guiding(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Start Guiding")
             }
             NodeType::StopGuiding => {
                 let ctx = context.to_instruction_context().await;
-                execute_stop_guiding(&ctx).await.log_and_get_status("Stop Guiding")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Stop Guiding: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_stop_guiding(&ctx, Some(&progress_fn)).await.log_and_get_status("Stop Guiding")
             }
             NodeType::ChangeFilter(config) => {
                 let ctx = context.to_instruction_context().await;

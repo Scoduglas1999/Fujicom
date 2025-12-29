@@ -1381,34 +1381,95 @@ pub async fn execute_dither(
 // =============================================================================
 
 /// Execute start guiding - starts PHD2 guiding and waits for settle
-pub async fn execute_start_guiding(config: &StartGuidingConfig, ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_start_guiding(
+    config: &StartGuidingConfig,
+    ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
     tracing::info!("Starting guiding with settle threshold {} px", config.settle_pixels);
+
+    // Emit initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Starting guiding".to_string());
+    }
 
     if let Some(result) = ctx.check_cancelled() {
         return result;
     }
 
+    // Progress: Connecting to guider
+    if let Some(cb) = progress_callback {
+        cb(20.0, "Connecting to guider".to_string());
+    }
+
+    // Check guider connection status
+    match ctx.device_ops.guider_get_status().await {
+        Ok(status) => {
+            tracing::debug!("Guider status: is_guiding={}, rms_total={:.2}", status.is_guiding, status.rms_total);
+        }
+        Err(e) => {
+            tracing::warn!("Could not get guider status: {}", e);
+            // Continue anyway - guider_start may still work
+        }
+    }
+
+    if let Some(result) = ctx.check_cancelled() {
+        return result;
+    }
+
+    // Progress: Starting guide camera loop
+    if let Some(cb) = progress_callback {
+        cb(40.0, "Starting guide camera loop".to_string());
+    }
+
     // Start guiding - this will auto-select a star if needed and wait for settle
+    if let Some(cb) = progress_callback {
+        cb(60.0, "Waiting for guiding to stabilize".to_string());
+    }
+
     match ctx.device_ops.guider_start(
         config.settle_pixels,
         config.settle_time,
         config.settle_timeout,
     ).await {
-        Ok(_) => InstructionResult::success_with_message("Guiding started and settled"),
+        Ok(_) => {
+            if let Some(cb) = progress_callback {
+                cb(100.0, "Guiding active".to_string());
+            }
+            InstructionResult::success_with_message("Guiding started and settled")
+        }
         Err(e) => InstructionResult::failure(format!("Failed to start guiding: {}", e)),
     }
 }
 
 /// Execute stop guiding - stops PHD2 guiding
-pub async fn execute_stop_guiding(ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_stop_guiding(
+    ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
     tracing::info!("Stopping guiding");
+
+    // Emit initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Stopping guiding".to_string());
+    }
 
     if let Some(result) = ctx.check_cancelled() {
         return result;
     }
 
+    // Progress: Sending stop command
+    if let Some(cb) = progress_callback {
+        cb(50.0, "Sending stop command".to_string());
+    }
+
     match ctx.device_ops.guider_stop().await {
-        Ok(_) => InstructionResult::success_with_message("Guiding stopped"),
+        Ok(_) => {
+            if let Some(cb) = progress_callback {
+                cb(100.0, "Guiding stopped".to_string());
+            }
+            InstructionResult::success_with_message("Guiding stopped")
+        }
         Err(e) => InstructionResult::failure(format!("Failed to stop guiding: {}", e)),
     }
 }
