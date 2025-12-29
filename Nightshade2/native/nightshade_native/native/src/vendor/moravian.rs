@@ -652,46 +652,49 @@ impl NativeCamera for MoravianCamera {
 
         let sdk = get_sdk()?;
 
-        // Acquire global SDK mutex for thread safety
-        let _lock = moravian_mutex().lock().await;
+        // Use a scoped block for mutex to ensure it's released before sleeping
+        {
+            // Acquire global SDK mutex for thread safety
+            let _lock = moravian_mutex().lock().await;
 
-        let handle = self.handle.lock().unwrap().0;
+            let handle = self.handle.lock().unwrap().0;
 
-        // Clear sensor first
-        if unsafe { (sdk.clear_sensor)(handle) } == 0 {
-            tracing::error!(
-                "Moravian ClearSensor() failed for camera '{}'. Sensor may be busy or hardware error occurred.",
-                self.name
+            // Clear sensor first
+            if unsafe { (sdk.clear_sensor)(handle) } == 0 {
+                tracing::error!(
+                    "Moravian ClearSensor() failed for camera '{}'. Sensor may be busy or hardware error occurred.",
+                    self.name
+                );
+                return Err(NativeError::SdkError(format!(
+                    "Failed to clear sensor on Moravian camera '{}'. Sensor may be busy.",
+                    self.name
+                )));
+            }
+
+            // Start exposure (use shutter if available)
+            let use_shutter = if self.use_shutter { 1 } else { 0 };
+
+            if unsafe { (sdk.begin_exposure)(handle, use_shutter) } == 0 {
+                tracing::error!(
+                    "Moravian BeginExposure() failed for camera '{}'. Duration: {:.3}s, UseShutter: {}",
+                    self.name, params.duration_secs, self.use_shutter
+                );
+                return Err(NativeError::SdkError(format!(
+                    "Failed to start exposure on Moravian camera '{}'. The camera may be busy or disconnected.",
+                    self.name
+                )));
+            }
+
+            self.exposure_duration = params.duration_secs;
+            self.state = CameraState::Exposing;
+
+            tracing::info!(
+                "Started {:.3}s exposure on Moravian camera",
+                params.duration_secs
             );
-            return Err(NativeError::SdkError(format!(
-                "Failed to clear sensor on Moravian camera '{}'. Sensor may be busy.",
-                self.name
-            )));
-        }
+        } // Mutex released here BEFORE sleeping
 
-        // Start exposure (use shutter if available)
-        let use_shutter = if self.use_shutter { 1 } else { 0 };
-
-        if unsafe { (sdk.begin_exposure)(handle, use_shutter) } == 0 {
-            tracing::error!(
-                "Moravian BeginExposure() failed for camera '{}'. Duration: {:.3}s, UseShutter: {}",
-                self.name, params.duration_secs, self.use_shutter
-            );
-            return Err(NativeError::SdkError(format!(
-                "Failed to start exposure on Moravian camera '{}'. The camera may be busy or disconnected.",
-                self.name
-            )));
-        }
-
-        self.exposure_duration = params.duration_secs;
-        self.state = CameraState::Exposing;
-
-        tracing::info!(
-            "Started {:.3}s exposure on Moravian camera",
-            params.duration_secs
-        );
-
-        // Wait for exposure duration
+        // Wait for exposure duration (mutex is NOT held during this sleep)
         tokio::time::sleep(tokio::time::Duration::from_secs_f64(params.duration_secs)).await;
 
         Ok(())
