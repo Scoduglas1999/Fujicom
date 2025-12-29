@@ -416,6 +416,12 @@ async fn wait_for_focuser_idle(focuser_id: &str, ctx: &InstructionContext, timeo
     loop {
         // Check cancellation
         if ctx.cancellation_token.load(Ordering::Relaxed) {
+            // Halt the focuser and wait for it to stop before returning
+            tracing::info!("Cancellation detected during focuser move, halting focuser");
+            if let Err(e) = ctx.device_ops.focuser_halt(focuser_id).await {
+                tracing::warn!("Failed to halt focuser during cancellation: {}", e);
+            }
+            wait_for_focuser_stop_after_halt(focuser_id, &ctx.device_ops, Duration::from_secs(10)).await;
             return Err("Operation cancelled".to_string());
         }
 
