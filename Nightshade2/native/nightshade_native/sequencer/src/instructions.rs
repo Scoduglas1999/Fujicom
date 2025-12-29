@@ -2571,13 +2571,27 @@ pub async fn execute_park_dome(
 /// Execute mosaic panel iteration
 /// This is a container instruction that iterates through mosaic panels
 /// The actual panel calculation is done in the mosaic module
-pub async fn execute_mosaic(config: &crate::MosaicConfig, _ctx: &InstructionContext) -> InstructionResult {
+pub async fn execute_mosaic(
+    config: &crate::MosaicConfig,
+    _ctx: &InstructionContext,
+    progress_callback: Option<&(dyn Fn(f64, String) + Send + Sync)>,
+) -> InstructionResult {
+    // Emit initial progress
+    if let Some(cb) = progress_callback {
+        cb(0.0, "Starting mosaic".to_string());
+    }
+
     tracing::info!(
         "Starting mosaic: {}x{} panels, {:.1}% overlap",
         config.panels_horizontal,
         config.panels_vertical,
         config.overlap_percent
     );
+
+    // Emit progress for calculating panels
+    if let Some(cb) = progress_callback {
+        cb(30.0, "Calculating panel positions".to_string());
+    }
 
     // Calculate all panel positions
     let panels = crate::mosaic::calculate_mosaic_panels(config);
@@ -2588,6 +2602,11 @@ pub async fn execute_mosaic(config: &crate::MosaicConfig, _ctx: &InstructionCont
     // Note: The actual execution of visiting each panel will be handled by the
     // node execution logic which will create child slew/center/expose nodes
     // for each panel. This instruction just validates the configuration.
+
+    // Emit final progress
+    if let Some(cb) = progress_callback {
+        cb(100.0, format!("Mosaic configured: {} panels", total_panels));
+    }
 
     InstructionResult {
         status: NodeStatus::Success,

@@ -1116,11 +1116,47 @@ impl Node for RuntimeNode {
             }
             NodeType::Mosaic(config) => {
                 let ctx = context.to_instruction_context().await;
-                execute_mosaic(config, &ctx).await.log_and_get_status("Mosaic")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Mosaic: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                execute_mosaic(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Mosaic")
             }
             NodeType::FlatWizard(config) => {
                 let ctx = context.to_instruction_context().await;
-                crate::flat_wizard::execute_flat_wizard(config, &ctx).await.log_and_get_status("Flat Wizard")
+                let node_id = self.id().clone();
+                let progress_cb = context.progress_callback.as_ref();
+
+                let progress_fn = |progress: f64, detail: String| {
+                    if let Some(cb) = progress_cb {
+                        cb(ProgressUpdate {
+                            node_id: node_id.clone(),
+                            status: NodeStatus::Running,
+                            message: Some(format!("Flat Wizard: {} ({:.0}%)", detail, progress)),
+                            current_frame: None,
+                            total_frames: None,
+                            current_child: None,
+                            total_children: None,
+                            completed_exposure_secs: None,
+                        });
+                    }
+                };
+
+                crate::flat_wizard::execute_flat_wizard(config, &ctx, Some(&progress_fn)).await.log_and_get_status("Flat Wizard")
             }
             NodeType::OpenCover(config) => {
                 let ctx = context.to_instruction_context().await;
