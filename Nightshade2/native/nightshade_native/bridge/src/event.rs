@@ -143,6 +143,25 @@ pub struct PolarAlignmentStatus {
     pub point: i32,
 }
 
+/// Polar alignment image data for UI display
+#[frb]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolarAlignmentImageEvent {
+    /// JPEG-encoded image bytes for display
+    pub image_data: Vec<u8>,
+    /// Image width
+    pub width: u32,
+    /// Image height
+    pub height: u32,
+    /// Plate solve result (if available)
+    pub solved_ra: Option<f64>,
+    pub solved_dec: Option<f64>,
+    /// Current measurement point (1-3) or 0 for adjustment phase
+    pub point: i32,
+    /// Phase: "measuring" or "adjusting"
+    pub phase: String,
+}
+
 /// Imaging-specific events
 #[frb]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -323,6 +342,7 @@ pub enum EventPayload {
     System(SystemEvent),
     PolarAlignment(PolarAlignmentEvent),
     PolarAlignmentStatus(PolarAlignmentStatus),
+    PolarAlignmentImage(PolarAlignmentImageEvent),
 }
 
 /// Statistics about the event bus
