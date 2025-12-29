@@ -46,6 +46,7 @@ pub use timeout_ops::*;
 pub use unified_device_ops::*;
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::PathBuf;
 use std::panic::{self, AssertUnwindSafe};
 use futures::FutureExt;
@@ -56,55 +57,114 @@ use tracing_subscriber::util::SubscriberInitExt;
 /// Global Tokio runtime for async operations
 static RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
+/// Tracks whether runtime initialization has permanently failed.
+/// Once this is set to true, all async operations will return errors instead of attempting
+/// to create a runtime (which would just fail again).
+static RUNTIME_INIT_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Error message from the last runtime initialization failure.
+/// Used to provide consistent error messages when RUNTIME_INIT_FAILED is true.
+static RUNTIME_ERROR_MSG: OnceLock<String> = OnceLock::new();
+
 /// Global log directory path
 static LOG_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Global log file guard (keeps file writer alive)
 static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
-/// Initialize the global runtime
-/// This must be called before any async operations
+/// Initialize the global runtime, returning a Result.
 ///
-/// # Panics
-/// This function will NOT panic. If runtime creation fails, it will:
-/// 1. Log the error
-/// 2. Try a simplified runtime configuration
-/// 3. Return a minimal runtime as last resort
-pub(crate) fn ensure_runtime() -> &'static Runtime {
-    RUNTIME.get_or_init(|| {
-        // First attempt: Create a multi-threaded runtime with default settings
-        match Runtime::new() {
-            Ok(rt) => rt,
-            Err(e) => {
-                eprintln!("WARNING: Failed to create default Tokio runtime: {}", e);
-                tracing::error!("Failed to create default Tokio runtime: {}", e);
+/// This function NEVER panics. If runtime creation fails after all fallback attempts,
+/// it sets a static error state and returns an error. Subsequent calls will immediately
+/// return the cached error without retrying (to avoid repeated resource exhaustion).
+///
+/// # Returns
+/// - `Ok(&'static Runtime)` if the runtime was successfully created or already exists
+/// - `Err(NightshadeError)` if runtime creation failed permanently
+pub(crate) fn ensure_runtime() -> Result<&'static Runtime, NightshadeError> {
+    // Fast path: check if we already have a runtime
+    if let Some(rt) = RUNTIME.get() {
+        return Ok(rt);
+    }
 
-                // Second attempt: Try a current-thread runtime (simpler, fewer resources)
-                match tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                {
-                    Ok(rt) => {
-                        tracing::warn!("Using single-threaded Tokio runtime as fallback");
-                        rt
-                    }
-                    Err(e2) => {
-                        eprintln!("CRITICAL: All runtime creation attempts failed: {}, {}", e, e2);
-                        // Last resort: Create absolute minimal runtime
-                        // This should never fail as it's the simplest possible configuration
-                        tokio::runtime::Builder::new_current_thread()
-                            .build()
-                            .unwrap_or_else(|e3| {
-                                // If we truly cannot create a runtime, this is a system-level failure
-                                // We panic here because there's no way to recover - async code cannot work
-                                eprintln!("FATAL: Cannot create any Tokio runtime: {}", e3);
-                                panic!("Cannot create Tokio runtime - system resources exhausted: {}", e3);
-                            })
-                    }
-                }
-            }
+    // Fast path: check if we've already failed permanently
+    if RUNTIME_INIT_FAILED.load(Ordering::Acquire) {
+        let msg = RUNTIME_ERROR_MSG.get()
+            .map(|s| s.as_str())
+            .unwrap_or("Unknown runtime initialization failure");
+        return Err(NightshadeError::RuntimeInitFailed(msg.to_string()));
+    }
+
+    // Try to initialize the runtime with fallbacks
+    // We use get_or_init but wrap the entire creation in Result handling
+    let result = try_create_runtime_with_fallbacks();
+
+    match result {
+        Ok(rt) => {
+            // Successfully created - store it
+            // Note: If another thread beat us to it, get_or_init returns the existing one
+            Ok(RUNTIME.get_or_init(|| rt))
         }
-    })
+        Err(error_msg) => {
+            // All attempts failed - record the permanent failure
+            eprintln!("FATAL: Runtime initialization failed permanently: {}", error_msg);
+            tracing::error!("Runtime initialization failed permanently: {}", error_msg);
+
+            // Set the error state (only the first thread to fail sets the message)
+            let _ = RUNTIME_ERROR_MSG.set(error_msg.clone());
+            RUNTIME_INIT_FAILED.store(true, Ordering::Release);
+
+            Err(NightshadeError::RuntimeInitFailed(error_msg))
+        }
+    }
+}
+
+/// Try to create a runtime with fallbacks. Returns the runtime or an error message.
+/// This function NEVER panics.
+fn try_create_runtime_with_fallbacks() -> Result<Runtime, String> {
+    // First attempt: Create a multi-threaded runtime with default settings
+    match Runtime::new() {
+        Ok(rt) => {
+            tracing::debug!("Created multi-threaded Tokio runtime");
+            return Ok(rt);
+        }
+        Err(e) => {
+            eprintln!("WARNING: Failed to create default Tokio runtime: {}", e);
+            tracing::warn!("Failed to create default Tokio runtime: {}", e);
+        }
+    }
+
+    // Second attempt: Try a current-thread runtime with all features
+    match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => {
+            tracing::warn!("Using single-threaded Tokio runtime as fallback");
+            return Ok(rt);
+        }
+        Err(e2) => {
+            eprintln!("WARNING: Single-threaded runtime with all features failed: {}", e2);
+            tracing::warn!("Single-threaded runtime with all features failed: {}", e2);
+        }
+    }
+
+    // Third attempt: Minimal runtime without IO or timers
+    match tokio::runtime::Builder::new_current_thread().build() {
+        Ok(rt) => {
+            tracing::warn!("Using minimal Tokio runtime (no IO, no timers)");
+            eprintln!("WARNING: Using minimal Tokio runtime - some features may not work");
+            return Ok(rt);
+        }
+        Err(e3) => {
+            let error_msg = format!(
+                "All runtime creation attempts failed. System may be resource-exhausted: {}",
+                e3
+            );
+            eprintln!("CRITICAL: {}", error_msg);
+            Err(error_msg)
+        }
+    }
 }
 
 /// Try to create a runtime, returning an error instead of panicking
@@ -131,15 +191,27 @@ fn init_panic_handler() {
 /// Initialize the native bridge with logging
 /// Must be called once at app startup
 ///
+/// This function wraps all initialization in panic catching to ensure that even
+/// if initialization fails catastrophically, we return an error rather than
+/// crashing the Flutter app.
+///
 /// # Arguments
 /// * `log_directory` - Optional path to store log files. If None, logs only to console.
 #[flutter_rust_bridge::frb(sync)]
 pub fn init_native_with_logging(log_directory: Option<String>) -> Result<(), NightshadeError> {
+    // Install panic handler first - this must happen before any other code
+    // so that panics are properly logged even if catch_unwind doesn't catch them
+    init_panic_handler();
+
+    // Wrap the entire initialization in panic catching for FFI safety
+    catch_panic_sync(|| init_native_internal(log_directory))
+}
+
+/// Internal initialization function that does the actual work.
+/// Separated out so we can wrap it in panic catching.
+fn init_native_internal(log_directory: Option<String>) -> Result<(), NightshadeError> {
     use tracing_subscriber::fmt;
     use tracing_subscriber::EnvFilter;
-
-    // Install panic handler first
-    init_panic_handler();
 
     // Create env filter for log level
     let env_filter = EnvFilter::try_from_default_env()
@@ -153,7 +225,7 @@ pub fn init_native_with_logging(log_directory: Option<String>) -> Result<(), Nig
         if let Err(e) = std::fs::create_dir_all(&log_path) {
             eprintln!("Failed to create log directory: {}", e);
             // Fall back to console-only logging
-            return init_native();
+            return init_native_internal(None);
         }
 
         LOG_DIR.set(log_path.clone()).ok();
@@ -196,8 +268,8 @@ pub fn init_native_with_logging(log_directory: Option<String>) -> Result<(), Nig
         tracing::info!("Nightshade Native Bridge initialized (console logging only)");
     }
 
-    // Ensure runtime is created
-    let _ = ensure_runtime();
+    // Ensure runtime is created - propagate errors to caller
+    ensure_runtime()?;
 
     Ok(())
 }
@@ -362,8 +434,7 @@ pub fn get_native_version() -> String {
 ///     })
 /// }
 /// ```
-#[allow(dead_code)]
-pub(crate) fn catch_panic_sync<F, T>(f: F) -> Result<T, NightshadeError>
+pub fn catch_panic_sync<F, T>(f: F) -> Result<T, NightshadeError>
 where
     F: FnOnce() -> Result<T, NightshadeError> + panic::UnwindSafe,
 {
@@ -395,8 +466,7 @@ where
 ///     }).await
 /// }
 /// ```
-#[allow(dead_code)]
-pub(crate) async fn catch_panic_async<F, T>(f: F) -> Result<T, NightshadeError>
+pub async fn catch_panic_async<F, T>(f: F) -> Result<T, NightshadeError>
 where
     F: std::future::Future<Output = Result<T, NightshadeError>>,
 {
@@ -431,48 +501,16 @@ fn extract_panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-/// Safe version of ensure_runtime that returns a Result instead of panicking.
+/// Get the global runtime, returning a Result instead of panicking.
 ///
-/// This is the preferred method for obtaining the runtime in new code where
-/// failure can be gracefully handled.
-#[allow(dead_code)]
+/// This is an alias for `ensure_runtime()` for backwards compatibility and clarity.
+/// It will never panic - if the runtime cannot be created, it returns an error.
+///
+/// # Returns
+/// - `Ok(&'static Runtime)` if the runtime is available
+/// - `Err(NightshadeError::RuntimeInitFailed)` if runtime creation failed
 pub(crate) fn get_runtime() -> Result<&'static Runtime, NightshadeError> {
-    // If already initialized, return it
-    if let Some(rt) = RUNTIME.get() {
-        return Ok(rt);
-    }
-
-    // Try to create with catch_unwind for safety
-    match panic::catch_unwind(|| {
-        RUNTIME.get_or_init(|| {
-            match Runtime::new() {
-                Ok(rt) => rt,
-                Err(e) => {
-                    eprintln!("WARNING: Failed to create default Tokio runtime: {}", e);
-                    // Try single-threaded as fallback
-                    tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .unwrap_or_else(|e2| {
-                            eprintln!("WARNING: Single-threaded runtime also failed: {}", e2);
-                            // Absolute minimal - no timers, no IO
-                            tokio::runtime::Builder::new_current_thread()
-                                .build()
-                                .expect("Minimal runtime must succeed")
-                        })
-                }
-            }
-        })
-    }) {
-        Ok(rt) => Ok(rt),
-        Err(panic_payload) => {
-            let msg = extract_panic_message(&panic_payload);
-            Err(NightshadeError::RuntimeInitFailed(format!(
-                "Failed to initialize Tokio runtime: {}",
-                msg
-            )))
-        }
-    }
+    ensure_runtime()
 }
 
 /// Executes an async operation on the global runtime with panic safety.
@@ -492,8 +530,7 @@ pub(crate) fn get_runtime() -> Result<&'static Runtime, NightshadeError> {
 ///     })
 /// }
 /// ```
-#[allow(dead_code)]
-pub(crate) fn run_async_safe<F, T>(future: F) -> Result<T, NightshadeError>
+pub fn run_async_safe<F, T>(future: F) -> Result<T, NightshadeError>
 where
     F: std::future::Future<Output = Result<T, NightshadeError>> + Send + 'static,
     T: Send + 'static,
