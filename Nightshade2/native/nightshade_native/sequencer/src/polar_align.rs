@@ -260,6 +260,12 @@ pub async fn perform_polar_alignment(
     // 3. Adjustment Loop
     status_callback("Entering adjustment mode".to_string(), Some(1.0));
 
+    // Auto-complete tracking
+    let threshold_arcsec = config.auto_complete_threshold;
+    let threshold_arcmin = threshold_arcsec / 60.0;
+    let mut below_threshold_start: Option<std::time::Instant> = None;
+    const AUTO_COMPLETE_HOLD_SECS: u64 = 3;
+
     loop {
         if let Some(result) = ctx.check_cancelled() {
             return result;
@@ -366,7 +372,33 @@ pub async fn perform_polar_alignment(
         }
         
         tracing::info!("Polar Align Error: Alt {:.1}', Az {:.1}'", result.altitude_error, result.azimuth_error);
-        
+
+        // Check auto-complete threshold
+        if total_error_am < threshold_arcmin {
+            match below_threshold_start {
+                None => {
+                    below_threshold_start = Some(std::time::Instant::now());
+                    tracing::info!("Error below threshold, starting hold timer");
+                }
+                Some(start) => {
+                    if start.elapsed().as_secs() >= AUTO_COMPLETE_HOLD_SECS {
+                        tracing::info!("Auto-complete: error held below threshold for {}s", AUTO_COMPLETE_HOLD_SECS);
+                        return InstructionResult::success_with_message(format!(
+                            "Polar alignment complete! Final error: {:.1}\" (below {:.0}\" threshold)",
+                            total_error_am * 60.0,  // Convert to arcsec for display
+                            threshold_arcsec
+                        ));
+                    }
+                }
+            }
+        } else {
+            // Reset timer if error goes above threshold
+            if below_threshold_start.is_some() {
+                tracing::debug!("Error above threshold, resetting hold timer");
+                below_threshold_start = None;
+            }
+        }
+
         // Wait a bit
         sleep(Duration::from_secs(1)).await;
     }
