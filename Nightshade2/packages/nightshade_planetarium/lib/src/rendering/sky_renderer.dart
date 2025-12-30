@@ -929,18 +929,36 @@ class SkyCanvasPainter extends CustomPainter {
   }
 
   void _drawConstellationLines(Canvas canvas, Size size, Offset center, double scale) {
-    final paint = Paint()
-      ..color = config.constellationLineColor
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-    
+    // Extract base color and alpha from config
+    final baseColor = config.constellationLineColor;
+    final baseAlpha = baseColor.a;
+
     for (final constellation in constellations) {
       for (final line in constellation.lines) {
         final start = _celestialToScreen(line.start, center, scale);
         final end = _celestialToScreen(line.end, center, scale);
-        
+
         if (start != null && end != null) {
           if (_isInView(start, size) || _isInView(end, size)) {
+            // Gradient along line for subtle depth effect
+            final gradient = ui.Gradient.linear(
+              start,
+              end,
+              [
+                baseColor.withValues(alpha: baseAlpha * 0.7),
+                baseColor.withValues(alpha: baseAlpha * 0.5),
+                baseColor.withValues(alpha: baseAlpha * 0.7),
+              ],
+              [0.0, 0.5, 1.0],
+            );
+
+            final paint = Paint()
+              ..shader = gradient
+              ..strokeWidth = 1.5  // Increased from 1.0 for better visibility
+              ..strokeCap = StrokeCap.round  // Smooth anti-aliased ends
+              ..strokeJoin = StrokeJoin.round
+              ..style = PaintingStyle.stroke;
+
             canvas.drawLine(start, end, paint);
           }
         }
