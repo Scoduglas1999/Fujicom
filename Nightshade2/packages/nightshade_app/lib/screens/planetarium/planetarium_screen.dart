@@ -9,6 +9,7 @@ import 'package:nightshade_ui/nightshade_ui.dart';
 import 'package:nightshade_planetarium/nightshade_planetarium.dart';
 import 'package:nightshade_core/nightshade_core.dart';
 import 'package:intl/intl.dart';
+import 'widgets/filter_sidebar.dart';
 
 /// Get display name and catalog tag for a DSO
 /// Returns (displayName, catalogTag)
@@ -70,7 +71,10 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
 
   // Track if initial sync has been done
   bool _initialSyncDone = false;
-  
+
+  // Filter sidebar state
+  bool _filterSidebarExpanded = false;
+
   @override
   void initState() {
     super.initState();
@@ -610,6 +614,17 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
                           textColor: colors.textPrimary,
                           accentColor: colors.accent,
                           compact: false,
+                        ),
+                      ),
+
+                      // Filter Sidebar
+                      Positioned(
+                        top: 60,
+                        right: 0,
+                        bottom: 0,
+                        child: FilterSidebar(
+                          isExpanded: _filterSidebarExpanded,
+                          onToggle: () => setState(() => _filterSidebarExpanded = !_filterSidebarExpanded),
                         ),
                       ),
                     ],
