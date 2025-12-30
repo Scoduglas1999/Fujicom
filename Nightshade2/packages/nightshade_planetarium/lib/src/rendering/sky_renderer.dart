@@ -1048,8 +1048,9 @@ class SkyCanvasPainter extends CustomPainter {
         }
       }
 
-      // Star color based on spectral type
+      // Star color based on spectral type with enhanced saturation for bright stars
       var color = _spectralTypeToColor(star.spectralType ?? 'G');
+      color = _getEnhancedStarColor(color, magnitude);
 
       // Apply atmospheric extinction (dimming and reddening near horizon)
       if (doExtinction) {
@@ -2603,9 +2604,29 @@ class SkyCanvasPainter extends CustomPainter {
            offset.dy >= -50 && offset.dy <= size.height + 50;
   }
   
-  double _magnitudeToRadius(double mag) {
-    // Brighter stars have larger radius
-    return math.max(0.5, (6.5 - mag) * 0.8);
+  /// Enhanced magnitude-to-size scaling - brighter stars "pop" more
+  /// Uses tiered scaling with FOV consideration for realistic star appearance
+  double _magnitudeToRadius(double magnitude, {double? fov}) {
+    final effectiveFov = fov ?? viewState.fieldOfView;
+
+    double baseRadius;
+    if (magnitude < 0) {
+      // Very bright stars (Sirius, Canopus) - exponential boost
+      baseRadius = 6.0 + (0 - magnitude) * 2.5;
+    } else if (magnitude < 2) {
+      // Bright stars - significant boost
+      baseRadius = 3.0 + (2 - magnitude) * 1.5;
+    } else if (magnitude < 4) {
+      // Medium stars - moderate scaling
+      baseRadius = 1.5 + (4 - magnitude) * 0.75;
+    } else {
+      // Faint stars - small but visible
+      baseRadius = math.max(0.5, (6.5 - magnitude) * 0.3);
+    }
+
+    // Scale with zoom (stars appear larger when zoomed in)
+    final zoomFactor = (90 / effectiveFov).clamp(0.8, 2.0);
+    return (baseRadius * zoomFactor).clamp(0.5, 25.0);
   }
   
   double _magnitudeToBrightness(double mag) {
@@ -2634,6 +2655,23 @@ class SkyCanvasPainter extends CustomPainter {
       default:
         return Colors.white;
     }
+  }
+
+  /// Boost color saturation for bright stars (mag < 2)
+  /// Makes prominent stars more visually distinctive with richer colors
+  Color _getEnhancedStarColor(Color baseColor, double magnitude) {
+    if (magnitude < 2) {
+      final hsl = HSLColor.fromColor(baseColor);
+      // Boost saturation more for brighter stars
+      final boostFactor = ((2 - magnitude) / 4).clamp(0.0, 0.5);
+      final boostedSaturation = (hsl.saturation + boostFactor).clamp(0.0, 1.0);
+
+      return hsl
+          .withSaturation(boostedSaturation)
+          .withLightness((hsl.lightness * 1.1).clamp(0.0, 1.0))
+          .toColor();
+    }
+    return baseColor;
   }
 
   // ============ Gradient-based glow helpers ============
