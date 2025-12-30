@@ -265,7 +265,12 @@ class SkyCanvasPainter extends CustomPainter {
     if (config.showEcliptic) {
       _drawEcliptic(canvas, size, center, scale);
     }
-    
+
+    // Draw ground plane (before horizon line so horizon draws on top)
+    if (config.showGroundPlane) {
+      _drawGroundPlane(canvas, size, center, scale);
+    }
+
     // Draw horizon
     if (config.showHorizon) {
       _drawHorizon(canvas, size, center, scale);
@@ -664,6 +669,97 @@ class SkyCanvasPainter extends CustomPainter {
         ..color = const Color(0x40000000)
         ..style = PaintingStyle.fill;
       canvas.drawPath(path, fillPaint);
+    }
+  }
+
+  /// Draw ground plane below the horizon with gradient
+  void _drawGroundPlane(Canvas canvas, Size size, Offset center, double scale) {
+    if (!config.showGroundPlane) return;
+
+    final lst = AstronomyCalculations.localSiderealTime(observationTime, longitude);
+
+    // Build path for area below horizon
+    final groundPath = Path();
+    var firstPoint = true;
+    final horizonPoints = <Offset>[];
+
+    for (var az = 0.0; az <= 360; az += 2) {
+      final (ra, dec) = AstronomyCalculations.horizontalToEquatorial(
+        altDeg: 0,
+        azDeg: az,
+        latitudeDeg: latitude,
+        lstHours: lst,
+      );
+
+      final offset = _celestialToScreen(
+        CelestialCoordinate(ra: ra / 15, dec: dec),
+        center,
+        scale,
+      );
+
+      if (offset != null && _isInView(offset, size)) {
+        horizonPoints.add(offset);
+        if (firstPoint) {
+          groundPath.moveTo(offset.dx, offset.dy);
+          firstPoint = false;
+        } else {
+          groundPath.lineTo(offset.dx, offset.dy);
+        }
+      }
+    }
+
+    if (horizonPoints.isEmpty) return;
+
+    // Close the path by extending to screen edges below horizon
+    // This creates a filled region for the ground
+    groundPath.lineTo(size.width, size.height);
+    groundPath.lineTo(0, size.height);
+    groundPath.close();
+
+    // Draw based on quality setting
+    if (qualityConfig.groundPlaneDetail <= 0.0) {
+      // Performance: solid dark color
+      final paint = Paint()
+        ..color = config.groundColorDark
+        ..style = PaintingStyle.fill;
+      canvas.drawPath(groundPath, paint);
+    } else {
+      // Balanced/Quality: gradient from horizon down
+      final gradient = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          config.horizonGlowColor,
+          config.groundColorLight,
+          config.groundColorDark,
+        ],
+        stops: const [0.0, 0.3, 1.0],
+      );
+
+      final paint = Paint()
+        ..shader = gradient.createShader(Rect.fromLTWH(0, 0, size.width, size.height))
+        ..style = PaintingStyle.fill;
+      canvas.drawPath(groundPath, paint);
+
+      // Quality mode: add subtle horizon glow line
+      if (qualityConfig.groundPlaneDetail >= 1.0 && horizonPoints.length > 2) {
+        final glowPaint = Paint()
+          ..color = config.horizonGlowColor.withValues(alpha: 0.4)
+          ..strokeWidth = 4
+          ..style = PaintingStyle.stroke
+          ..strokeCap = StrokeCap.round;
+
+        if (qualityConfig.useBlurEffects) {
+          glowPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+        }
+
+        final glowPath = Path();
+        glowPath.moveTo(horizonPoints.first.dx, horizonPoints.first.dy);
+        for (final pt in horizonPoints.skip(1)) {
+          glowPath.lineTo(pt.dx, pt.dy);
+        }
+        canvas.drawPath(glowPath, glowPaint);
+      }
     }
   }
 
