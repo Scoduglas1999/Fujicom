@@ -556,15 +556,39 @@ final dynamicMagnitudeLimitsProvider = Provider<(double, double)>((ref) {
 // ============================================================================
 
 final loadedStarsProvider = FutureProvider<List<Star>>((ref) async {
-  // Limit to magnitude 5.0 (approx 1.6k stars) to prevent OOM on mobile
-  // The full 120k stars (mag 15) is too much for mobile memory/rendering
-  return HygStarCatalog(magnitudeLimit: 5.0).loadObjects();
+  // Load stars up to magnitude 10.0 to allow deeper viewing when zoomed in
+  // The dynamic magnitude limit will filter these based on FOV
+  return HygStarCatalog(magnitudeLimit: 10.0).loadObjects();
 });
 
 final loadedDsosProvider = FutureProvider<List<DeepSkyObject>>((ref) async {
-  // Limit to magnitude 12.0 to include popular imaging targets like IC410
-  // while preventing OOM on mobile
-  return OpenNgcDsoCatalog(magnitudeLimit: 12.0).loadObjects();
+  // Load DSOs up to magnitude 14.0 to include faint imaging targets when zoomed in
+  // The dynamic magnitude limit will filter these based on FOV
+  return OpenNgcDsoCatalog(magnitudeLimit: 14.0).loadObjects();
+});
+
+/// Stars filtered by dynamic magnitude limit based on current FOV
+/// As the user zooms in (narrower FOV), fainter stars become visible.
+/// This provider should be used by the sky renderer for FOV-aware star display.
+final fovFilteredStarsProvider = Provider<AsyncValue<List<Star>>>((ref) {
+  final starsAsync = ref.watch(loadedStarsProvider);
+  final (starMagLimit, _) = ref.watch(dynamicMagnitudeLimitsProvider);
+
+  return starsAsync.whenData((stars) {
+    return stars.where((star) => (star.magnitude ?? 99) <= starMagLimit).toList();
+  });
+});
+
+/// DSOs filtered by dynamic magnitude limit based on current FOV
+/// As the user zooms in (narrower FOV), fainter DSOs become visible.
+/// This provider should be used by the sky renderer for FOV-aware DSO display.
+final fovFilteredDsosProvider = Provider<AsyncValue<List<DeepSkyObject>>>((ref) {
+  final dsosAsync = ref.watch(loadedDsosProvider);
+  final (_, dsoMagLimit) = ref.watch(dynamicMagnitudeLimitsProvider);
+
+  return dsosAsync.whenData((dsos) {
+    return dsos.where((dso) => (dso.magnitude ?? 99) <= dsoMagLimit).toList();
+  });
 });
 
 final constellationDataProvider = Provider<List<ConstellationData>>((ref) {

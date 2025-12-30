@@ -227,8 +227,8 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
     final location = ref.watch(observerLocationProvider);
     final time = ref.watch(observationTimeProvider);
     final selectedObject = ref.watch(selectedObjectProvider);
-    final stars = ref.watch(loadedStarsProvider);
-    final dsos = ref.watch(loadedDsosProvider);
+    final stars = ref.watch(fovFilteredStarsProvider);
+    final dsos = ref.watch(fovFilteredDsosProvider);
     final constellations = ref.watch(constellationDataProvider);
     final equipmentFOV = ref.watch(equipmentFOVProvider);
     final mountPosition = ref.watch(mountPositionProvider);
@@ -390,9 +390,9 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
     // Notify coordinate tap
     widget.onCoordinateTapped?.call(coord);
 
-    // Try to find a nearby object
-    final stars = ref.read(loadedStarsProvider).valueOrNull ?? [];
-    final dsos = ref.read(loadedDsosProvider).valueOrNull ?? [];
+    // Try to find a nearby object using FOV-filtered objects
+    final stars = ref.read(fovFilteredStarsProvider).valueOrNull ?? [];
+    final dsos = ref.read(fovFilteredDsosProvider).valueOrNull ?? [];
 
     CelestialObject? nearestObject;
     double nearestDistance = double.infinity;
