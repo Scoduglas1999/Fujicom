@@ -183,6 +183,50 @@ class SkyViewState {
   }
 }
 
+/// Tracks rendered label bounding boxes to avoid overlap
+class LabelLayoutManager {
+  final List<Rect> _renderedLabels = [];
+
+  void clear() => _renderedLabels.clear();
+
+  /// Returns true if label can be placed without overlap
+  bool canPlace(Rect labelRect) {
+    final paddedRect = labelRect.inflate(2);
+    for (final existing in _renderedLabels) {
+      if (paddedRect.overlaps(existing)) return false;
+    }
+    return true;
+  }
+
+  /// Try to find placement, returns offset or null
+  Offset? findPlacement(Offset preferred, Size labelSize, Size canvasSize) {
+    final offsets = [
+      preferred,
+      preferred + const Offset(0, -12), // Above
+      preferred + const Offset(12, 0), // Right
+      preferred + const Offset(-12, 0), // Left
+      preferred + const Offset(0, 12), // Below
+    ];
+
+    for (final offset in offsets) {
+      final rect =
+          Rect.fromLTWH(offset.dx, offset.dy, labelSize.width, labelSize.height);
+      if (canPlace(rect) && _isInBounds(rect, canvasSize)) {
+        _renderedLabels.add(rect);
+        return offset;
+      }
+    }
+    return null;
+  }
+
+  bool _isInBounds(Rect rect, Size canvasSize) {
+    return rect.left >= 0 &&
+        rect.top >= 0 &&
+        rect.right <= canvasSize.width &&
+        rect.bottom <= canvasSize.height;
+  }
+}
+
 /// Enhanced sky rendering painter
 class SkyCanvasPainter extends CustomPainter {
   final SkyViewState viewState;
@@ -224,6 +268,9 @@ class SkyCanvasPainter extends CustomPainter {
   static const double _deg2rad = math.pi / 180;
   static const double _rad2deg = 180 / math.pi;
 
+  /// Label layout manager to avoid overlapping labels
+  final LabelLayoutManager _labelManager = LabelLayoutManager();
+
   SkyCanvasPainter({
     required this.viewState,
     required this.config,
@@ -254,7 +301,10 @@ class SkyCanvasPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final scale = math.min(size.width, size.height) / 2 / (viewState.fieldOfView / 2);
-    
+
+    // Clear label layout manager for fresh label placement
+    _labelManager.clear();
+
     // Draw background gradient
     _drawBackground(canvas, size);
 
@@ -1296,18 +1346,31 @@ class SkyCanvasPainter extends CustomPainter {
       // Draw star using quality-appropriate PSF
       _drawStarPSF(canvas, offset, radius, color, brightness, magnitude);
 
-      // Draw star name for bright stars
+      // Draw star name for bright stars with collision avoidance
       if (magnitude < 2.0 && star.name.isNotEmpty) {
+        final fontSize = _getLabelFontSize(magnitude, 'star');
+        final fontWeight = _getLabelFontWeight(magnitude);
         final textStyle = TextStyle(
           color: Colors.white.withValues(alpha: 0.6),
-          fontSize: 9,
+          fontSize: fontSize,
+          fontWeight: fontWeight,
         );
         final textPainter = TextPainter(
           text: TextSpan(text: star.name, style: textStyle),
           textDirection: ui.TextDirection.ltr,
         );
         textPainter.layout();
-        textPainter.paint(canvas, offset + Offset(radius + 3, -textPainter.height / 2));
+
+        // Find non-overlapping placement
+        final preferredPos = offset + Offset(radius + 3, -textPainter.height / 2);
+        final labelPos = _labelManager.findPlacement(
+          preferredPos,
+          Size(textPainter.width, textPainter.height),
+          size,
+        );
+        if (labelPos != null) {
+          textPainter.paint(canvas, labelPos);
+        }
       }
 
       starsDrawn++;
@@ -1528,19 +1591,33 @@ class SkyCanvasPainter extends CustomPainter {
         // Draw DSO symbol with pop-in alpha
         _drawDSOSymbolWithAlpha(canvas, offset, displaySize, dso.type, popinAlpha);
 
-        // Draw DSO label with pop-in alpha
+        // Draw DSO label with pop-in alpha and collision avoidance
         if (config.showDSOLabels) {
+          final dsoMag = dso.magnitude ?? 10.0;
+          final fontSize = _getLabelFontSize(dsoMag, 'dso');
+          final fontWeight = _getLabelFontWeight(dsoMag);
           final baseAlpha = 0.7 * popinAlpha;
           final textStyle = TextStyle(
             color: _dsoTypeColor(dso.type).withValues(alpha: baseAlpha),
-            fontSize: 9,
+            fontSize: fontSize,
+            fontWeight: fontWeight,
           );
           final textPainter = TextPainter(
             text: TextSpan(text: dso.name, style: textStyle),
             textDirection: ui.TextDirection.ltr,
           );
           textPainter.layout();
-          textPainter.paint(canvas, offset + Offset(displaySize / 2 + 3, -textPainter.height / 2));
+
+          // Find non-overlapping placement
+          final preferredPos = offset + Offset(displaySize / 2 + 3, -textPainter.height / 2);
+          final labelPos = _labelManager.findPlacement(
+            preferredPos,
+            Size(textPainter.width, textPainter.height),
+            size,
+          );
+          if (labelPos != null) {
+            textPainter.paint(canvas, labelPos);
+          }
         }
 
         canvas.restore();
@@ -1549,18 +1626,32 @@ class SkyCanvasPainter extends CustomPainter {
         // Draw DSO symbol based on type
         _drawDSOSymbol(canvas, offset, displaySize, dso.type);
 
-        // Draw DSO label
+        // Draw DSO label with collision avoidance
         if (config.showDSOLabels) {
+          final dsoMag = dso.magnitude ?? 10.0;
+          final fontSize = _getLabelFontSize(dsoMag, 'dso');
+          final fontWeight = _getLabelFontWeight(dsoMag);
           final textStyle = TextStyle(
             color: _dsoTypeColor(dso.type).withValues(alpha: 0.7),
-            fontSize: 9,
+            fontSize: fontSize,
+            fontWeight: fontWeight,
           );
           final textPainter = TextPainter(
             text: TextSpan(text: dso.name, style: textStyle),
             textDirection: ui.TextDirection.ltr,
           );
           textPainter.layout();
-          textPainter.paint(canvas, offset + Offset(displaySize / 2 + 3, -textPainter.height / 2));
+
+          // Find non-overlapping placement
+          final preferredPos = offset + Offset(displaySize / 2 + 3, -textPainter.height / 2);
+          final labelPos = _labelManager.findPlacement(
+            preferredPos,
+            Size(textPainter.width, textPainter.height),
+            size,
+          );
+          if (labelPos != null) {
+            textPainter.paint(canvas, labelPos);
+          }
         }
       }
 
@@ -2629,21 +2720,29 @@ class SkyCanvasPainter extends CustomPainter {
         _drawPlanetDetails(canvas, offset, radius, planet.name, planetColor);
       }
 
-      // Planet label
+      // Planet label with collision avoidance
+      final fontSize = _getLabelFontSize(planet.magnitude, 'planet');
       final textStyle = TextStyle(
         color: planetColor,
-        fontSize: 9,
-        fontWeight: FontWeight.w500,
+        fontSize: fontSize,
+        fontWeight: FontWeight.w600, // Planets always prominent
       );
       final textPainter = TextPainter(
         text: TextSpan(text: planet.name.toUpperCase(), style: textStyle),
         textDirection: ui.TextDirection.ltr,
       );
       textPainter.layout();
-      textPainter.paint(
-        canvas,
-        offset + Offset(-textPainter.width / 2, radius + 4),
+
+      // Find non-overlapping placement (preferred below planet)
+      final preferredPos = offset + Offset(-textPainter.width / 2, radius + 4);
+      final labelPos = _labelManager.findPlacement(
+        preferredPos,
+        Size(textPainter.width, textPainter.height),
+        size,
       );
+      if (labelPos != null) {
+        textPainter.paint(canvas, labelPos);
+      }
     }
   }
 
@@ -2854,7 +2953,24 @@ class SkyCanvasPainter extends CustomPainter {
     // Brighter stars are more opaque
     return math.min(1.0, math.max(0.3, (7 - mag) / 6));
   }
-  
+
+  /// Get font size based on magnitude and object type for label hierarchy
+  double _getLabelFontSize(double magnitude, String objectType) {
+    if (objectType == 'planet') return 12.0;
+
+    if (magnitude < 0) return 12.0; // Very bright
+    if (magnitude < 2) return 11.0; // Bright
+    if (magnitude < 4) return 10.0; // Medium
+    return 9.0; // Faint
+  }
+
+  /// Get font weight based on magnitude for label hierarchy
+  FontWeight _getLabelFontWeight(double magnitude) {
+    if (magnitude < 1) return FontWeight.w600;
+    if (magnitude < 3) return FontWeight.w500;
+    return FontWeight.w400;
+  }
+
   Color _spectralTypeToColor(String spectralType) {
     if (spectralType.isEmpty) return Colors.white;
 
