@@ -496,6 +496,154 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
     ref.read(skyViewStateProvider.notifier).setFieldOfView(60);
   }
 
+  /// Show filter bottom sheet for phone/tablet layout
+  void _showFilterBottomSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => Consumer(
+        builder: (context, ref, _) {
+          final config = ref.watch(skyRenderConfigProvider);
+          return Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white38,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Filters',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('Stars'),
+                  value: config.showStars,
+                  onChanged: (_) => ref.read(skyRenderConfigProvider.notifier).toggleStars(),
+                ),
+                SwitchListTile(
+                  title: const Text('Planets'),
+                  value: config.showPlanets,
+                  onChanged: (_) => ref.read(skyRenderConfigProvider.notifier).togglePlanets(),
+                ),
+                SwitchListTile(
+                  title: const Text('Deep Sky'),
+                  value: config.showDSOs,
+                  onChanged: (_) => ref.read(skyRenderConfigProvider.notifier).toggleDSOs(),
+                ),
+                const Divider(),
+                SwitchListTile(
+                  title: const Text('Grid'),
+                  value: config.showCoordinateGrid,
+                  onChanged: (_) => ref.read(skyRenderConfigProvider.notifier).toggleGrid(),
+                ),
+                SwitchListTile(
+                  title: const Text('Constellations'),
+                  value: config.showConstellationLines,
+                  onChanged: (_) => ref.read(skyRenderConfigProvider.notifier).toggleConstellationLines(),
+                ),
+                SwitchListTile(
+                  title: const Text('Ground'),
+                  value: ref.watch(showGroundPlaneProvider),
+                  onChanged: (v) => ref.read(showGroundPlaneProvider.notifier).state = v,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Show context menu on right-click (desktop)
+  void _showContextMenu(BuildContext context, Offset position) {
+    final RenderBox? overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+
+    showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        overlay.size.width - position.dx,
+        overlay.size.height - position.dy,
+      ),
+      items: [
+        const PopupMenuItem<String>(
+          value: 'reset',
+          child: Row(
+            children: [
+              Icon(LucideIcons.home, size: 16),
+              SizedBox(width: 8),
+              Text('Reset View'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'grid',
+          child: Row(
+            children: [
+              Icon(LucideIcons.grid, size: 16),
+              SizedBox(width: 8),
+              Text('Toggle Grid'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'constellations',
+          child: Row(
+            children: [
+              Icon(LucideIcons.activity, size: 16),
+              SizedBox(width: 8),
+              Text('Toggle Constellations'),
+            ],
+          ),
+        ),
+        const PopupMenuItem<String>(
+          value: 'fov',
+          child: Row(
+            children: [
+              Icon(LucideIcons.frame, size: 16),
+              SizedBox(width: 8),
+              Text('Toggle FOV Overlay'),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == null) return;
+      switch (value) {
+        case 'reset':
+          _resetView();
+          break;
+        case 'grid':
+          ref.read(skyRenderConfigProvider.notifier).toggleGrid();
+          break;
+        case 'constellations':
+          ref.read(skyRenderConfigProvider.notifier).toggleConstellationLines();
+          break;
+        case 'fov':
+          setState(() => _showFOV = !_showFOV);
+          break;
+      }
+    });
+  }
+
+  /// Check if device is a phone (narrow screen)
+  bool _isPhoneLayout(BuildContext context) {
+    return MediaQuery.of(context).size.width < 600;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<NightshadeColors>()!;
@@ -562,10 +710,13 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
                   child: Stack(
                     key: _skyViewKey,
                     children: [
-                      // Interactive sky view
-                      InteractiveSkyView(
-                        showFOV: _showFOV,
-                        onObjectTapped: _handleObjectTapped,
+                      // Interactive sky view with right-click context menu (desktop)
+                      GestureDetector(
+                        onSecondaryTapUp: (details) => _showContextMenu(context, details.globalPosition),
+                        child: InteractiveSkyView(
+                          showFOV: _showFOV,
+                          onObjectTapped: _handleObjectTapped,
+                        ),
                       ),
 
                       // Top overlay bar
@@ -651,18 +802,20 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
 
                       // Compass HUD (bottom-left, above time control)
                       Positioned(
-                        left: 16,
-                        bottom: 16,
+                        left: AdaptiveSizing.of(context).edgePadding,
+                        bottom: AdaptiveSizing.of(context).edgePadding,
                         child: Consumer(
                           builder: (context, ref, _) {
                             final showCompass = ref.watch(showCompassHudProvider);
                             if (!showCompass) return const SizedBox.shrink();
 
+                            final sizing = AdaptiveSizing.of(context);
                             final (az, alt) = ref.watch(viewCenterAltAzProvider);
                             return CompassHud(
                               azimuth: az,
                               altitude: alt,
-                              size: 80,
+                              size: sizing.compassSize,
+                              showAltitude: !sizing.useCondensedHud,
                             );
                           },
                         ),
@@ -670,13 +823,14 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
 
                       // Mini-map (bottom-right)
                       Positioned(
-                        right: 16,
-                        bottom: 16,
+                        right: AdaptiveSizing.of(context).edgePadding,
+                        bottom: AdaptiveSizing.of(context).edgePadding,
                         child: Consumer(
                           builder: (context, ref, _) {
                             final showMinimap = ref.watch(showMinimapProvider);
                             if (!showMinimap) return const SizedBox.shrink();
 
+                            final sizing = AdaptiveSizing.of(context);
                             final (az, alt) = ref.watch(viewCenterAltAzProvider);
                             final viewState = ref.watch(skyViewStateProvider);
 
@@ -685,7 +839,7 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
                               altitude: alt,
                               fieldOfView: viewState.fieldOfView,
                               rotation: viewState.rotation,
-                              size: 100,
+                              size: sizing.minimapSize,
                               onTap: (tapAz, tapAlt) {
                                 // Convert alt/az back to RA/Dec and update view
                                 final location = ref.read(observerLocationProvider);
@@ -718,22 +872,37 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
                         ),
                       ),
 
-                      // Filter Sidebar
-                      Positioned(
-                        top: 60,
-                        right: 0,
-                        bottom: 0,
-                        child: FilterSidebar(
-                          isExpanded: _filterSidebarExpanded,
-                          onToggle: () => setState(() => _filterSidebarExpanded = !_filterSidebarExpanded),
+                      // Filter Sidebar (desktop only)
+                      if (!_isPhoneLayout(context))
+                        Positioned(
+                          top: 60,
+                          right: 0,
+                          bottom: 0,
+                          child: FilterSidebar(
+                            isExpanded: _filterSidebarExpanded,
+                            onToggle: () => setState(() => _filterSidebarExpanded = !_filterSidebarExpanded),
+                          ),
                         ),
-                      ),
+
+                      // Filter FAB (phone only)
+                      if (_isPhoneLayout(context))
+                        Positioned(
+                          right: 16,
+                          bottom: 130,
+                          child: FloatingActionButton.small(
+                            heroTag: 'filter_fab',
+                            backgroundColor: colors.primary,
+                            onPressed: () => _showFilterBottomSheet(context),
+                            child: const Icon(LucideIcons.slidersHorizontal, size: 20),
+                          ),
+                        ),
                     ],
                   ),
                 ),
 
-                // Right sidebar
-                ResizablePanel(
+                // Right sidebar (desktop only)
+                if (!_isPhoneLayout(context))
+                  ResizablePanel(
                   initialWidth: 340,
                   minWidth: 250,
                   maxWidth: 500,

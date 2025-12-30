@@ -40,6 +40,8 @@ export 'src/providers/planetarium_providers.dart';
 export 'src/providers/catalog_providers.dart';
 export 'src/providers/planning_providers.dart';
 export 'src/providers/target_queue_provider.dart';
+export 'src/providers/platform_providers.dart';
+export 'src/providers/performance_providers.dart';
 
 // Widgets
 export 'src/widgets/interactive_sky_view.dart';
@@ -48,3 +50,4 @@ export 'src/widgets/time_control_panel.dart';
 export 'src/widgets/object_details_panel.dart';
 export 'src/widgets/compass_hud.dart';
 export 'src/widgets/sky_minimap.dart';
+export 'src/widgets/adaptive_layout.dart';
