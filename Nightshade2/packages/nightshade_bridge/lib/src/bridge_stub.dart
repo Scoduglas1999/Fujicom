@@ -674,8 +674,11 @@ class NativeBridge {
 
     // Fallback to local event controller for simulator mode
     // Convert internal stub events to proper NightshadeEvent format
+    var stubEventId = BigInt.zero;
     return _eventController.stream.map((stubEvent) {
+      stubEventId += BigInt.one;
       return gen_event.NightshadeEvent(
+        eventId: stubEventId,
         timestamp: stubEvent.timestamp,
         severity: stubEvent.severity,
         category: stubEvent.category,
@@ -3254,9 +3257,13 @@ class NativeBridge {
     }
 
     // Stub fallback
+    var stubSeqEventId = BigInt.zero;
     return _eventController.stream
         .where((event) => event.category == gen_event.EventCategory.sequencer)
-        .map((stubEvent) => gen_event.NightshadeEvent(
+        .map((stubEvent) {
+          stubSeqEventId += BigInt.one;
+          return gen_event.NightshadeEvent(
+              eventId: stubSeqEventId,
               timestamp: stubEvent.timestamp,
               severity: stubEvent.severity,
               category: stubEvent.category,
@@ -3267,7 +3274,8 @@ class NativeBridge {
                   level: stubEvent.severity.name,
                 ),
               ),
-            ));
+            );
+        });
   }
 
   static bool _simulationMode = false;

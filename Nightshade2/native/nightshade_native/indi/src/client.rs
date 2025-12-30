@@ -58,8 +58,29 @@ pub enum IndiEvent {
     ConnectionStateChanged(bool),
     /// Error occurred
     Error(String),
-    /// Reader task died (for supervision)
+    /// Reader task died (for supervision) - includes error message
     ReaderDied(String),
+    /// Reader task is restarting - includes attempt number and delay
+    ReaderRestarting {
+        attempt: u32,
+        max_attempts: u32,
+        delay_secs: f64,
+    },
+    /// Reader task restarted successfully after failure
+    ReaderRestarted {
+        attempts_used: u32,
+    },
+    /// Reader task restart failed after max attempts
+    ReaderRestartFailed {
+        attempts: u32,
+        last_error: String,
+    },
+    /// Reader task health changed
+    ReaderHealthChanged {
+        healthy: bool,
+        status: ReaderStatus,
+        consecutive_failures: u32,
+    },
     /// Protocol version detected
     ProtocolVersionDetected(String),
 }
@@ -82,9 +103,67 @@ type NumberLimitsMap = HashMap<(String, String, String), NumberLimits>;
 /// Reader task status for supervision
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReaderStatus {
+    /// Reader task is running normally
     Running,
+    /// Reader task has stopped gracefully
     Stopped,
-    Failed,
+    /// Reader task has crashed/failed
+    Crashed,
+    /// Reader task is being restarted
+    Restarting,
+}
+
+/// Configuration for reader task supervision
+#[derive(Debug, Clone)]
+pub struct ReaderTaskConfig {
+    /// Maximum number of consecutive failures before giving up (default: 5)
+    pub max_consecutive_failures: u32,
+    /// Base delay for restart backoff (default: 1 second)
+    pub restart_base_delay_secs: u64,
+    /// Maximum delay cap for restart backoff (default: 60 seconds)
+    pub restart_max_delay_secs: u64,
+    /// Whether to automatically restart on failure (default: true)
+    pub auto_restart: bool,
+    /// Use jitter in restart delays to prevent thundering herd (default: true)
+    pub use_jitter: bool,
+    /// Jitter factor (0.0 to 1.0, default 0.3)
+    pub jitter_factor: f64,
+}
+
+impl Default for ReaderTaskConfig {
+    fn default() -> Self {
+        Self {
+            max_consecutive_failures: 5,
+            restart_base_delay_secs: 1,
+            restart_max_delay_secs: 60,
+            auto_restart: true,
+            use_jitter: true,
+            jitter_factor: 0.3,
+        }
+    }
+}
+
+impl ReaderTaskConfig {
+    /// Calculate restart delay for a given attempt number with optional jitter
+    pub fn calculate_restart_delay(&self, attempt: u32) -> Duration {
+        let base = Duration::from_secs(self.restart_base_delay_secs);
+        let max = Duration::from_secs(self.restart_max_delay_secs);
+
+        // Calculate exponential delay: base * 2^(attempt-1)
+        let exponential_delay = base
+            .checked_mul(2u32.pow(attempt.saturating_sub(1)))
+            .unwrap_or(max)
+            .min(max);
+
+        if self.use_jitter && self.jitter_factor > 0.0 {
+            let jitter_range = exponential_delay.as_secs_f64() * self.jitter_factor;
+            let random_factor = rand_simple() * jitter_range - (jitter_range / 2.0);
+            let jittered_secs = (exponential_delay.as_secs_f64() + random_factor).max(0.1);
+            Duration::from_secs_f64(jittered_secs.min(max.as_secs_f64()))
+        } else {
+            exponential_delay
+        }
+    }
 }
 
 /// Configuration for protocol version
@@ -189,6 +268,8 @@ pub struct IndiClient {
     reconnect_attempts: Arc<AtomicU32>,
     /// Reader task status
     reader_status: Arc<RwLock<ReaderStatus>>,
+    /// Consecutive reader failure count (for supervision)
+    reader_consecutive_failures: Arc<AtomicU32>,
     /// Shutdown signal sender
     shutdown_tx: Option<oneshot::Sender<()>>,
     /// Protocol configuration
@@ -197,6 +278,8 @@ pub struct IndiClient {
     server_version: Arc<RwLock<Option<String>>>,
     /// Reconnection configuration
     reconnection_config: ReconnectionConfig,
+    /// Reader task supervision configuration
+    reader_task_config: ReaderTaskConfig,
 }
 
 impl IndiClient {
@@ -226,10 +309,12 @@ impl IndiClient {
             last_keepalive_ms: Arc::new(AtomicU64::new(current_time_ms())),
             reconnect_attempts: Arc::new(AtomicU32::new(0)),
             reader_status: Arc::new(RwLock::new(ReaderStatus::Stopped)),
+            reader_consecutive_failures: Arc::new(AtomicU32::new(0)),
             shutdown_tx: None,
             protocol_config: ProtocolConfig::default(),
             server_version: Arc::new(RwLock::new(None)),
             reconnection_config: ReconnectionConfig::default(),
+            reader_task_config: ReaderTaskConfig::default(),
         }
     }
 
@@ -240,6 +325,25 @@ impl IndiClient {
         timeout_config: IndiTimeoutConfig,
         protocol_config: ProtocolConfig,
         reconnection_config: ReconnectionConfig,
+    ) -> Self {
+        Self::with_all_config(
+            host,
+            port,
+            timeout_config,
+            protocol_config,
+            reconnection_config,
+            ReaderTaskConfig::default(),
+        )
+    }
+
+    /// Create a new INDI client with all configuration options including reader task config
+    pub fn with_all_config(
+        host: &str,
+        port: Option<u16>,
+        timeout_config: IndiTimeoutConfig,
+        protocol_config: ProtocolConfig,
+        reconnection_config: ReconnectionConfig,
+        reader_task_config: ReaderTaskConfig,
     ) -> Self {
         let (event_tx, _) = broadcast::channel(100);
         Self {
@@ -256,10 +360,12 @@ impl IndiClient {
             last_keepalive_ms: Arc::new(AtomicU64::new(current_time_ms())),
             reconnect_attempts: Arc::new(AtomicU32::new(0)),
             reader_status: Arc::new(RwLock::new(ReaderStatus::Stopped)),
+            reader_consecutive_failures: Arc::new(AtomicU32::new(0)),
             shutdown_tx: None,
             protocol_config,
             server_version: Arc::new(RwLock::new(None)),
             reconnection_config,
+            reader_task_config,
         }
     }
 
@@ -291,6 +397,16 @@ impl IndiClient {
     /// Set the reconnection configuration
     pub fn set_reconnection_config(&mut self, config: ReconnectionConfig) {
         self.reconnection_config = config;
+    }
+
+    /// Get the reader task configuration
+    pub fn reader_task_config(&self) -> &ReaderTaskConfig {
+        &self.reader_task_config
+    }
+
+    /// Set the reader task configuration
+    pub fn set_reader_task_config(&mut self, config: ReaderTaskConfig) {
+        self.reader_task_config = config;
     }
 
     /// Get the detected server protocol version
@@ -347,12 +463,24 @@ impl IndiClient {
         let connected = self.connected.clone();
         let event_tx = self.event_tx.clone();
         let reader_status = self.reader_status.clone();
+        let reader_consecutive_failures = self.reader_consecutive_failures.clone();
         let server_version = self.server_version.clone();
         let last_keepalive_ms = self.last_keepalive_ms.clone();
         let timeout_config = self.timeout_config.clone();
+        let reader_task_config = self.reader_task_config.clone();
+
+        // Reset consecutive failures on successful connect
+        self.reader_consecutive_failures.store(0, Ordering::SeqCst);
 
         // Update reader status
         *self.reader_status.write().await = ReaderStatus::Running;
+
+        // Emit health changed event - reader is now healthy
+        let _ = self.event_tx.send(IndiEvent::ReaderHealthChanged {
+            healthy: true,
+            status: ReaderStatus::Running,
+            consecutive_failures: 0,
+        });
 
         tokio::spawn(async move {
             Self::supervised_reader_task(
@@ -364,9 +492,11 @@ impl IndiClient {
                 connected,
                 event_tx,
                 reader_status,
+                reader_consecutive_failures,
                 server_version,
                 last_keepalive_ms,
                 timeout_config,
+                reader_task_config,
                 shutdown_rx,
             )
             .await;
@@ -403,6 +533,17 @@ impl IndiClient {
     }
 
     /// Supervised reader task - wraps the reader with supervision logic
+    ///
+    /// This function monitors the reader task and tracks failures. When the reader
+    /// crashes, it:
+    /// 1. Increments the consecutive failure counter
+    /// 2. Updates the reader status to Crashed
+    /// 3. Emits appropriate events (ReaderDied, ReaderHealthChanged)
+    /// 4. Sets connected to false
+    ///
+    /// The caller (usually IndiClient via its event subscriber) is responsible for
+    /// deciding whether to reconnect based on the failure count and configuration.
+    #[allow(clippy::too_many_arguments)]
     async fn supervised_reader_task<R: AsyncRead + Unpin>(
         reader: R,
         devices: Arc<RwLock<HashMap<String, IndiDevice>>>,
@@ -412,12 +553,14 @@ impl IndiClient {
         connected: Arc<AtomicBool>,
         event_tx: broadcast::Sender<IndiEvent>,
         reader_status: Arc<RwLock<ReaderStatus>>,
+        reader_consecutive_failures: Arc<AtomicU32>,
         server_version: Arc<RwLock<Option<String>>>,
         last_keepalive_ms: Arc<AtomicU64>,
         timeout_config: IndiTimeoutConfig,
+        reader_task_config: ReaderTaskConfig,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) {
-        // Run the reader task with panic catching
+        // Run the reader task with panic catching via AssertUnwindSafe
         let result = tokio::select! {
             result = Self::reader_task_with_timeout(
                 reader,
@@ -434,27 +577,85 @@ impl IndiClient {
                 result
             }
             _ = &mut shutdown_rx => {
-                tracing::info!("Reader task received shutdown signal");
+                tracing::info!("INDI reader task received shutdown signal - graceful stop");
+                // Graceful shutdown - reset failure counter
+                reader_consecutive_failures.store(0, Ordering::SeqCst);
                 Ok(())
             }
         };
 
         // Update status based on result
-        let status = match result {
-            Ok(_) => ReaderStatus::Stopped,
+        match result {
+            Ok(_) => {
+                // Graceful shutdown - reset failure counter and update status
+                *reader_status.write().await = ReaderStatus::Stopped;
+                let _ = event_tx.send(IndiEvent::ReaderHealthChanged {
+                    healthy: false,
+                    status: ReaderStatus::Stopped,
+                    consecutive_failures: 0,
+                });
+                tracing::info!("INDI reader task stopped gracefully");
+            }
             Err(ref e) => {
-                tracing::error!("Reader task failed: {}", e);
+                // Failure - increment failure counter
+                let failures = reader_consecutive_failures.fetch_add(1, Ordering::SeqCst) + 1;
+                let max_failures = reader_task_config.max_consecutive_failures;
+
+                tracing::error!(
+                    "INDI reader task crashed (failure {}/{}): {}",
+                    failures,
+                    max_failures,
+                    e
+                );
+
+                // Update status to Crashed
+                *reader_status.write().await = ReaderStatus::Crashed;
+
+                // Emit ReaderDied event with error details
                 let _ = event_tx.send(IndiEvent::ReaderDied(e.to_string()));
-                ReaderStatus::Failed
+
+                // Emit health changed event
+                let _ = event_tx.send(IndiEvent::ReaderHealthChanged {
+                    healthy: false,
+                    status: ReaderStatus::Crashed,
+                    consecutive_failures: failures,
+                });
+
+                // Check if we've exceeded max failures
+                if failures >= max_failures {
+                    tracing::error!(
+                        "INDI reader task exceeded max consecutive failures ({}) - giving up",
+                        max_failures
+                    );
+                    let _ = event_tx.send(IndiEvent::ReaderRestartFailed {
+                        attempts: failures,
+                        last_error: e.to_string(),
+                    });
+                } else if reader_task_config.auto_restart {
+                    // Calculate restart delay and emit restart event
+                    let delay = reader_task_config.calculate_restart_delay(failures);
+                    tracing::info!(
+                        "INDI reader task will suggest restart in {:?} (attempt {}/{})",
+                        delay,
+                        failures,
+                        max_failures
+                    );
+                    let _ = event_tx.send(IndiEvent::ReaderRestarting {
+                        attempt: failures,
+                        max_attempts: max_failures,
+                        delay_secs: delay.as_secs_f64(),
+                    });
+                }
             }
         };
 
-        *reader_status.write().await = status;
+        // Always mark as disconnected when reader stops
         connected.store(false, Ordering::SeqCst);
         let _ = event_tx.send(IndiEvent::ConnectionStateChanged(false));
     }
 
     /// Reader task with XML parse timeout - processes incoming INDI messages
+    #[allow(clippy::too_many_arguments)]
     async fn reader_task_with_timeout<R: AsyncRead + Unpin>(
         reader: R,
         devices: Arc<RwLock<HashMap<String, IndiDevice>>>,
@@ -848,7 +1049,16 @@ impl IndiClient {
     }
 
     /// Disconnect from the INDI server
+    ///
+    /// This performs a graceful shutdown:
+    /// 1. Sends shutdown signal to reader task
+    /// 2. Closes the writer channel
+    /// 3. Clears all cached device/property state
+    /// 4. Resets failure counters (since this is intentional disconnect)
+    /// 5. Emits connection state change event
     pub async fn disconnect(&mut self) -> IndiResult<()> {
+        tracing::info!("Disconnecting from INDI server {}:{}", self.host, self.port);
+
         // Send shutdown signal to reader task
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
@@ -856,12 +1066,27 @@ impl IndiClient {
 
         self.tx = None; // Drop sender, which will close the writer task
         self.connected.store(false, Ordering::SeqCst);
+
+        // Clear cached state
         self.devices.write().await.clear();
         self.properties.write().await.clear();
         self.property_values.write().await.clear();
         self.number_limits.write().await.clear();
+
+        // Reset failure counter since this is intentional disconnect
+        self.reader_consecutive_failures.store(0, Ordering::SeqCst);
+
+        // Update reader status
         *self.reader_status.write().await = ReaderStatus::Stopped;
+
+        // Emit events
+        let _ = self.event_tx.send(IndiEvent::ReaderHealthChanged {
+            healthy: false,
+            status: ReaderStatus::Stopped,
+            consecutive_failures: 0,
+        });
         let _ = self.event_tx.send(IndiEvent::ConnectionStateChanged(false));
+
         Ok(())
     }
 
@@ -873,6 +1098,37 @@ impl IndiClient {
     /// Get reader task status
     pub async fn reader_status(&self) -> ReaderStatus {
         *self.reader_status.read().await
+    }
+
+    /// Check if the reader task is healthy (running with no recent failures)
+    ///
+    /// Returns true if:
+    /// - Reader status is Running
+    /// - Consecutive failure count is 0
+    ///
+    /// Returns false if:
+    /// - Reader is Stopped, Crashed, or Restarting
+    /// - There have been any consecutive failures (even if currently running)
+    pub fn is_reader_healthy(&self) -> bool {
+        // Non-async version for quick health checks
+        let failures = self.reader_consecutive_failures.load(Ordering::SeqCst);
+        failures == 0 && self.connected.load(Ordering::SeqCst)
+    }
+
+    /// Get the number of consecutive reader failures
+    pub fn reader_consecutive_failures(&self) -> u32 {
+        self.reader_consecutive_failures.load(Ordering::SeqCst)
+    }
+
+    /// Check if the reader has exceeded the maximum failure threshold
+    pub fn is_reader_failed_permanently(&self) -> bool {
+        let failures = self.reader_consecutive_failures.load(Ordering::SeqCst);
+        failures >= self.reader_task_config.max_consecutive_failures
+    }
+
+    /// Reset the consecutive failure counter (call after successful manual recovery)
+    pub fn reset_reader_failures(&self) {
+        self.reader_consecutive_failures.store(0, Ordering::SeqCst);
     }
 
     /// Send a raw INDI command
@@ -1387,6 +1643,85 @@ impl IndiClient {
         })
     }
 
+    /// Attempt to recover from a reader crash with proper supervision
+    ///
+    /// This method should be called when receiving a `ReaderRestarting` event.
+    /// It will:
+    /// 1. Wait for the suggested delay (based on failure count and backoff)
+    /// 2. Attempt to reconnect
+    /// 3. Emit appropriate events on success/failure
+    ///
+    /// Returns Ok(()) if reconnection succeeds, Err if it fails.
+    pub async fn recover_reader(&mut self) -> IndiResult<()> {
+        // Check if we've already exceeded max failures
+        if self.is_reader_failed_permanently() {
+            let failures = self.reader_consecutive_failures();
+            return Err(IndiError::ReconnectionFailed {
+                attempts: failures,
+                last_error: "Exceeded maximum consecutive reader failures".to_string(),
+            });
+        }
+
+        // Get current failure count for delay calculation
+        let failures = self.reader_consecutive_failures();
+
+        // Update status to Restarting
+        *self.reader_status.write().await = ReaderStatus::Restarting;
+        let _ = self.event_tx.send(IndiEvent::ReaderHealthChanged {
+            healthy: false,
+            status: ReaderStatus::Restarting,
+            consecutive_failures: failures,
+        });
+
+        // Calculate and wait for delay
+        if failures > 0 {
+            let delay = self.reader_task_config.calculate_restart_delay(failures);
+            tracing::info!(
+                "Waiting {:?} before reader recovery attempt {}",
+                delay,
+                failures
+            );
+            sleep(delay).await;
+        }
+
+        // Attempt to reconnect
+        match self.connect().await {
+            Ok(_) => {
+                tracing::info!("Reader recovery successful after {} attempts", failures);
+                let _ = self.event_tx.send(IndiEvent::ReaderRestarted {
+                    attempts_used: failures,
+                });
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Reader recovery failed: {}", e);
+                // Note: connect() will have already incremented the failure counter
+                // and emitted appropriate events through supervised_reader_task
+                Err(e)
+            }
+        }
+    }
+
+    /// Check if a reconnection is safe (not already in progress)
+    ///
+    /// Returns false if:
+    /// - Already connected
+    /// - Reader is in Restarting state
+    /// - A reconnection attempt is in progress
+    pub async fn can_reconnect(&self) -> bool {
+        if self.connected.load(Ordering::SeqCst) {
+            return false;
+        }
+
+        let status = *self.reader_status.read().await;
+        if status == ReaderStatus::Restarting {
+            return false;
+        }
+
+        let reconnect_attempts = self.reconnect_attempts.load(Ordering::SeqCst);
+        reconnect_attempts == 0
+    }
+
     /// Get the number of reconnection attempts
     pub async fn reconnect_attempts(&self) -> u32 {
         self.reconnect_attempts.load(Ordering::SeqCst)
@@ -1760,5 +2095,239 @@ mod tests {
         // Should be stopped initially
         let status = client.reader_status().await;
         assert_eq!(status, ReaderStatus::Stopped);
+    }
+
+    // =========================================================================
+    // Reader Supervision Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_reader_task_config_default() {
+        let config = ReaderTaskConfig::default();
+        assert_eq!(config.max_consecutive_failures, 5);
+        assert_eq!(config.restart_base_delay_secs, 1);
+        assert_eq!(config.restart_max_delay_secs, 60);
+        assert!(config.auto_restart);
+        assert!(config.use_jitter);
+        assert!((config.jitter_factor - 0.3).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_reader_task_config_delay_calculation() {
+        let config = ReaderTaskConfig {
+            max_consecutive_failures: 5,
+            restart_base_delay_secs: 1,
+            restart_max_delay_secs: 60,
+            auto_restart: true,
+            use_jitter: false, // Disable jitter for predictable testing
+            jitter_factor: 0.0,
+        };
+
+        // Test exponential growth
+        assert_eq!(config.calculate_restart_delay(1), Duration::from_secs(1));
+        assert_eq!(config.calculate_restart_delay(2), Duration::from_secs(2));
+        assert_eq!(config.calculate_restart_delay(3), Duration::from_secs(4));
+        assert_eq!(config.calculate_restart_delay(4), Duration::from_secs(8));
+        assert_eq!(config.calculate_restart_delay(5), Duration::from_secs(16));
+        assert_eq!(config.calculate_restart_delay(6), Duration::from_secs(32));
+        // Should cap at max
+        assert_eq!(config.calculate_restart_delay(7), Duration::from_secs(60));
+        assert_eq!(config.calculate_restart_delay(10), Duration::from_secs(60));
+    }
+
+    #[tokio::test]
+    async fn test_reader_task_config_with_jitter() {
+        let config = ReaderTaskConfig {
+            max_consecutive_failures: 5,
+            restart_base_delay_secs: 10,
+            restart_max_delay_secs: 100,
+            auto_restart: true,
+            use_jitter: true,
+            jitter_factor: 0.3,
+        };
+
+        // With 30% jitter, delay should be within +/- 15% of base
+        let delay = config.calculate_restart_delay(1);
+        let expected = 10.0;
+        let tolerance = expected * 0.15;
+        assert!(
+            delay.as_secs_f64() >= expected - tolerance && delay.as_secs_f64() <= expected + tolerance,
+            "Delay {} not within expected range [{}, {}]",
+            delay.as_secs_f64(),
+            expected - tolerance,
+            expected + tolerance
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_reader_healthy_initial_state() {
+        let client = IndiClient::new("localhost", Some(7624));
+
+        // Initially not connected, so not healthy
+        assert!(!client.is_reader_healthy());
+        assert_eq!(client.reader_consecutive_failures(), 0);
+        assert!(!client.is_reader_failed_permanently());
+    }
+
+    #[tokio::test]
+    async fn test_reader_consecutive_failures_tracking() {
+        let client = IndiClient::new("localhost", Some(7624));
+
+        // Initially zero
+        assert_eq!(client.reader_consecutive_failures(), 0);
+
+        // Simulate failures (normally done by supervised_reader_task)
+        client.reader_consecutive_failures.store(3, Ordering::SeqCst);
+        assert_eq!(client.reader_consecutive_failures(), 3);
+
+        // Reset
+        client.reset_reader_failures();
+        assert_eq!(client.reader_consecutive_failures(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_is_reader_failed_permanently() {
+        let client = IndiClient::new("localhost", Some(7624));
+        let max_failures = client.reader_task_config().max_consecutive_failures;
+
+        // Not failed initially
+        assert!(!client.is_reader_failed_permanently());
+
+        // Simulate failures below threshold
+        client.reader_consecutive_failures.store(max_failures - 1, Ordering::SeqCst);
+        assert!(!client.is_reader_failed_permanently());
+
+        // At threshold
+        client.reader_consecutive_failures.store(max_failures, Ordering::SeqCst);
+        assert!(client.is_reader_failed_permanently());
+
+        // Above threshold
+        client.reader_consecutive_failures.store(max_failures + 1, Ordering::SeqCst);
+        assert!(client.is_reader_failed_permanently());
+    }
+
+    #[tokio::test]
+    async fn test_can_reconnect_initial_state() {
+        let client = IndiClient::new("localhost", Some(7624));
+
+        // Initially not connected and not restarting, so can reconnect
+        assert!(client.can_reconnect().await);
+    }
+
+    #[tokio::test]
+    async fn test_can_reconnect_when_restarting() {
+        let client = IndiClient::new("localhost", Some(7624));
+
+        // Set status to Restarting
+        *client.reader_status.write().await = ReaderStatus::Restarting;
+
+        // Should not be able to reconnect while restarting
+        assert!(!client.can_reconnect().await);
+    }
+
+    #[tokio::test]
+    async fn test_can_reconnect_when_connected() {
+        let client = IndiClient::new("localhost", Some(7624));
+
+        // Simulate connected state
+        client.connected.store(true, Ordering::SeqCst);
+
+        // Should not be able to reconnect when already connected
+        assert!(!client.can_reconnect().await);
+    }
+
+    #[tokio::test]
+    async fn test_reader_status_enum_values() {
+        // Test that all enum variants exist and are distinct
+        let running = ReaderStatus::Running;
+        let stopped = ReaderStatus::Stopped;
+        let crashed = ReaderStatus::Crashed;
+        let restarting = ReaderStatus::Restarting;
+
+        assert_ne!(running, stopped);
+        assert_ne!(running, crashed);
+        assert_ne!(running, restarting);
+        assert_ne!(stopped, crashed);
+        assert_ne!(stopped, restarting);
+        assert_ne!(crashed, restarting);
+    }
+
+    #[tokio::test]
+    async fn test_reader_task_config_getter_setter() {
+        let mut client = IndiClient::new("localhost", Some(7624));
+
+        // Check default
+        assert_eq!(client.reader_task_config().max_consecutive_failures, 5);
+
+        // Modify
+        let mut new_config = client.reader_task_config().clone();
+        new_config.max_consecutive_failures = 10;
+        new_config.auto_restart = false;
+        client.set_reader_task_config(new_config);
+
+        // Verify change
+        assert_eq!(client.reader_task_config().max_consecutive_failures, 10);
+        assert!(!client.reader_task_config().auto_restart);
+    }
+
+    #[tokio::test]
+    async fn test_with_all_config_constructor() {
+        let timeout_config = IndiTimeoutConfig::default();
+        let protocol_config = ProtocolConfig::default();
+        let reconnection_config = ReconnectionConfig::default();
+        let reader_task_config = ReaderTaskConfig {
+            max_consecutive_failures: 10,
+            restart_base_delay_secs: 2,
+            restart_max_delay_secs: 120,
+            auto_restart: false,
+            use_jitter: false,
+            jitter_factor: 0.0,
+        };
+
+        let client = IndiClient::with_all_config(
+            "192.168.1.100",
+            Some(7625),
+            timeout_config,
+            protocol_config,
+            reconnection_config,
+            reader_task_config,
+        );
+
+        assert_eq!(client.host, "192.168.1.100");
+        assert_eq!(client.port, 7625);
+        assert_eq!(client.reader_task_config().max_consecutive_failures, 10);
+        assert!(!client.reader_task_config().auto_restart);
+    }
+
+    #[tokio::test]
+    async fn test_recover_reader_when_failed_permanently() {
+        let mut client = IndiClient::new("localhost", Some(7624));
+        let max_failures = client.reader_task_config().max_consecutive_failures;
+
+        // Simulate exceeding max failures
+        client.reader_consecutive_failures.store(max_failures, Ordering::SeqCst);
+
+        // Recovery should fail
+        let result = client.recover_reader().await;
+        assert!(result.is_err());
+        if let Err(IndiError::ReconnectionFailed { attempts, last_error }) = result {
+            assert_eq!(attempts, max_failures);
+            assert!(last_error.contains("Exceeded maximum"));
+        } else {
+            panic!("Expected ReconnectionFailed error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_disconnect_resets_failure_counter() {
+        let mut client = IndiClient::new("localhost", Some(7624));
+
+        // Simulate some failures
+        client.reader_consecutive_failures.store(3, Ordering::SeqCst);
+        assert_eq!(client.reader_consecutive_failures(), 3);
+
+        // Disconnect should reset
+        let _ = client.disconnect().await;
+        assert_eq!(client.reader_consecutive_failures(), 0);
     }
 }
