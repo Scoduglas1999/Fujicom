@@ -362,6 +362,19 @@ final viewCenterAltAzProvider = Provider<(double, double)>((ref) {
 });
 
 // ============================================================================
+// HUD Toggle Providers
+// ============================================================================
+
+/// Whether to show the compass HUD
+final showCompassHudProvider = StateProvider<bool>((ref) => true);
+
+/// Whether to show the mini-map
+final showMinimapProvider = StateProvider<bool>((ref) => true);
+
+/// Whether to show the ground plane
+final showGroundPlaneProvider = StateProvider<bool>((ref) => true);
+
+// ============================================================================
 // Sky Render Config Provider
 // ============================================================================
 
