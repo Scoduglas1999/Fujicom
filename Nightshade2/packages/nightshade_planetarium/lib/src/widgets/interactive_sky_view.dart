@@ -71,6 +71,11 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
   late AnimationController _popinController;
   double _popinPhase = 0.0;
 
+  // DSO pop-in animation (tracks previous DSO magnitude threshold)
+  double _previousDsoMagLimit = 10.0;
+  late AnimationController _dsoPopinController;
+  double _dsoPopinPhase = 0.0;
+
   // Parallax effect - tracks current pan delta for dim star offset
   Offset _currentPanDelta = Offset.zero;
 
@@ -118,6 +123,16 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
           _popinPhase = _popinController.value;
         });
       });
+
+    // DSO pop-in animation (300ms smooth fade/scale)
+    _dsoPopinController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    )..addListener(() {
+        setState(() {
+          _dsoPopinPhase = _dsoPopinController.value;
+        });
+      });
   }
 
   @override
@@ -127,6 +142,7 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
     _selectionController.dispose();
     _momentumController.dispose();
     _popinController.dispose();
+    _dsoPopinController.dispose();
     super.dispose();
   }
 
@@ -146,6 +162,18 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
           _popinController.forward(from: 0.0);
         }
         _previousMagLimit = newMagLimit;
+      }
+
+      // Trigger DSO pop-in animation when zooming reveals fainter DSOs
+      if (qualityConfig.enableDsoPopin) {
+        // DSOs have a different magnitude range, typically visible to mag ~14
+        // Estimate new DSO mag limit based on FOV
+        final newDsoMagLimit = 10.0 + (60.0 - newFOV).clamp(0.0, 54.0) / 12.0;
+        if (newDsoMagLimit > _previousDsoMagLimit + 0.3) {
+          // Zooming in revealed fainter DSOs - trigger pop-in
+          _dsoPopinController.forward(from: 0.0);
+        }
+        _previousDsoMagLimit = newDsoMagLimit;
       }
     }
   }
@@ -360,6 +388,7 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
                   animationPhase: _twinklePhase,
                   selectionAnimationPhase: qualityConfig.enableSelectionAnimation ? _selectionPhase : null,
                   popinAnimationPhase: qualityConfig.enableStarPopin ? _popinPhase : null,
+                  dsoPopinAnimationPhase: qualityConfig.enableDsoPopin ? _dsoPopinPhase : null,
                   parallaxPanDelta: qualityConfig.enableParallax ? _currentPanDelta : null,
                 ),
                 foregroundPainter: widget.showFOV

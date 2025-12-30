@@ -76,6 +76,9 @@ class RenderQualityConfig {
   /// Whether to animate star pop-in when zooming
   final bool enableStarPopin;
 
+  /// Whether to animate DSO pop-in when zooming
+  final bool enableDsoPopin;
+
   /// Whether to apply parallax effect to dim stars during pan
   final bool enableParallax;
 
@@ -105,6 +108,7 @@ class RenderQualityConfig {
     required this.enablePlanetDetails,
     required this.enableSelectionAnimation,
     required this.enableStarPopin,
+    required this.enableDsoPopin,
     required this.enableParallax,
     required this.starPsfQuality,
     required this.groundPlaneDetail,
@@ -138,6 +142,7 @@ class RenderQualityConfig {
         enablePlanetDetails = false,
         enableSelectionAnimation = false,
         enableStarPopin = false,
+        enableDsoPopin = false,
         enableParallax = false,
         starPsfQuality = 0.0,
         groundPlaneDetail = 0.0;
@@ -170,6 +175,7 @@ class RenderQualityConfig {
         enablePlanetDetails = false, // quality only
         enableSelectionAnimation = true,
         enableStarPopin = true,
+        enableDsoPopin = true,
         enableParallax = false, // quality only
         starPsfQuality = 0.5,
         groundPlaneDetail = 0.5;
@@ -202,6 +208,7 @@ class RenderQualityConfig {
         enablePlanetDetails = true,
         enableSelectionAnimation = true,
         enableStarPopin = true,
+        enableDsoPopin = true,
         enableParallax = true,
         starPsfQuality = 1.0,
         groundPlaneDetail = 1.0;
@@ -227,6 +234,7 @@ class RenderQualityConfig {
     this.enablePlanetDetails = false,
     this.enableSelectionAnimation = true,
     this.enableStarPopin = true,
+    this.enableDsoPopin = true,
     this.enableParallax = false,
     this.starPsfQuality = 0.5,
     this.groundPlaneDetail = 0.5,
@@ -265,6 +273,7 @@ class RenderQualityConfig {
     bool? enablePlanetDetails,
     bool? enableSelectionAnimation,
     bool? enableStarPopin,
+    bool? enableDsoPopin,
     bool? enableParallax,
     double? starPsfQuality,
     double? groundPlaneDetail,
@@ -289,6 +298,7 @@ class RenderQualityConfig {
       enablePlanetDetails: enablePlanetDetails ?? this.enablePlanetDetails,
       enableSelectionAnimation: enableSelectionAnimation ?? this.enableSelectionAnimation,
       enableStarPopin: enableStarPopin ?? this.enableStarPopin,
+      enableDsoPopin: enableDsoPopin ?? this.enableDsoPopin,
       enableParallax: enableParallax ?? this.enableParallax,
       starPsfQuality: starPsfQuality ?? this.starPsfQuality,
       groundPlaneDetail: groundPlaneDetail ?? this.groundPlaneDetail,
@@ -318,6 +328,7 @@ class RenderQualityConfig {
         other.enablePlanetDetails == enablePlanetDetails &&
         other.enableSelectionAnimation == enableSelectionAnimation &&
         other.enableStarPopin == enableStarPopin &&
+        other.enableDsoPopin == enableDsoPopin &&
         other.enableParallax == enableParallax &&
         other.starPsfQuality == starPsfQuality &&
         other.groundPlaneDetail == groundPlaneDetail;
@@ -344,6 +355,7 @@ class RenderQualityConfig {
         enablePlanetDetails,
         enableSelectionAnimation,
         enableStarPopin,
+        enableDsoPopin,
         enableParallax,
         starPsfQuality,
         groundPlaneDetail,

@@ -208,6 +208,9 @@ class SkyCanvasPainter extends CustomPainter {
   /// Animation phase for star pop-in (0.0 - 1.0)
   final double? popinAnimationPhase;
 
+  /// Animation phase for DSO pop-in (0.0 - 1.0)
+  final double? dsoPopinAnimationPhase;
+
   /// Current pan delta for parallax effect (pixels)
   final Offset? parallaxPanDelta;
 
@@ -235,6 +238,7 @@ class SkyCanvasPainter extends CustomPainter {
     this.animationPhase,
     this.selectionAnimationPhase,
     this.popinAnimationPhase,
+    this.dsoPopinAnimationPhase,
     this.parallaxPanDelta,
   });
   
@@ -1245,6 +1249,15 @@ class SkyCanvasPainter extends CustomPainter {
     final maxDsos = qualityConfig.maxDsosToRender;
     final magLimit = math.min(config.dsoMagnitudeLimit, qualityConfig.dsoMagnitudeLimit);
 
+    // Calculate pop-in animation values
+    // Phase goes from 0 to 1; use easeOutCubic for smooth deceleration
+    final popinPhase = dsoPopinAnimationPhase ?? 1.0;
+    final easedPhase = Curves.easeOutCubic.transform(popinPhase.clamp(0.0, 1.0));
+    // Scale from 80% to 100%
+    final popinScale = 0.8 + 0.2 * easedPhase;
+    // Alpha from 0 to 1
+    final popinAlpha = easedPhase;
+
     for (final dso in dsos) {
       if (dsosDrawn >= maxDsos) break;
       if ((dso.magnitude ?? 99) > magLimit) continue;
@@ -1255,25 +1268,285 @@ class SkyCanvasPainter extends CustomPainter {
       final dsoSize = (dso.sizeArcMin ?? 5) / 60 * scale;
       final displaySize = dsoSize.clamp(4.0, 30.0);
 
-      // Draw DSO symbol based on type
-      _drawDSOSymbol(canvas, offset, displaySize, dso.type);
+      // Apply pop-in animation if active
+      if (dsoPopinAnimationPhase != null && dsoPopinAnimationPhase! < 1.0) {
+        canvas.save();
+        // Scale from center of the DSO
+        canvas.translate(offset.dx, offset.dy);
+        canvas.scale(popinScale);
+        canvas.translate(-offset.dx, -offset.dy);
 
-      // Draw DSO label
-      if (config.showDSOLabels) {
-        final textStyle = TextStyle(
-          color: _dsoTypeColor(dso.type).withValues(alpha: 0.7),
-          fontSize: 9,
-        );
-        final textPainter = TextPainter(
-          text: TextSpan(text: dso.name, style: textStyle),
-          textDirection: ui.TextDirection.ltr,
-        );
-        textPainter.layout();
-        textPainter.paint(canvas, offset + Offset(displaySize / 2 + 3, -textPainter.height / 2));
+        // Draw DSO symbol with pop-in alpha
+        _drawDSOSymbolWithAlpha(canvas, offset, displaySize, dso.type, popinAlpha);
+
+        // Draw DSO label with pop-in alpha
+        if (config.showDSOLabels) {
+          final baseAlpha = 0.7 * popinAlpha;
+          final textStyle = TextStyle(
+            color: _dsoTypeColor(dso.type).withValues(alpha: baseAlpha),
+            fontSize: 9,
+          );
+          final textPainter = TextPainter(
+            text: TextSpan(text: dso.name, style: textStyle),
+            textDirection: ui.TextDirection.ltr,
+          );
+          textPainter.layout();
+          textPainter.paint(canvas, offset + Offset(displaySize / 2 + 3, -textPainter.height / 2));
+        }
+
+        canvas.restore();
+      } else {
+        // Normal rendering without animation
+        // Draw DSO symbol based on type
+        _drawDSOSymbol(canvas, offset, displaySize, dso.type);
+
+        // Draw DSO label
+        if (config.showDSOLabels) {
+          final textStyle = TextStyle(
+            color: _dsoTypeColor(dso.type).withValues(alpha: 0.7),
+            fontSize: 9,
+          );
+          final textPainter = TextPainter(
+            text: TextSpan(text: dso.name, style: textStyle),
+            textDirection: ui.TextDirection.ltr,
+          );
+          textPainter.layout();
+          textPainter.paint(canvas, offset + Offset(displaySize / 2 + 3, -textPainter.height / 2));
+        }
       }
 
       dsosDrawn++;
     }
+  }
+
+  /// Draw DSO symbol with custom alpha for pop-in animation
+  void _drawDSOSymbolWithAlpha(Canvas canvas, Offset center, double size, DsoType type, double alpha) {
+    final baseColor = _dsoTypeColor(type);
+    final adjustedColor = baseColor.withValues(alpha: baseColor.a * alpha);
+
+    switch (type) {
+      case DsoType.galaxy:
+      case DsoType.galaxyPair:
+      case DsoType.galaxyTriplet:
+        _drawGalaxyWithAlpha(canvas, center, size, adjustedColor, alpha);
+        break;
+
+      case DsoType.nebula:
+      case DsoType.emissionNebula:
+      case DsoType.reflectionNebula:
+      case DsoType.hiiRegion:
+        _drawNebulaWithAlpha(canvas, center, size, adjustedColor, type, alpha);
+        break;
+
+      case DsoType.planetaryNebula:
+        _drawPlanetaryNebulaWithAlpha(canvas, center, size, adjustedColor, alpha);
+        break;
+
+      case DsoType.openCluster:
+        _drawOpenClusterWithAlpha(canvas, center, size, adjustedColor, alpha);
+        break;
+
+      case DsoType.globularCluster:
+        _drawGlobularClusterWithAlpha(canvas, center, size, adjustedColor, alpha);
+        break;
+
+      case DsoType.supernova:
+        _drawSupernovaWithAlpha(canvas, center, size, adjustedColor, alpha);
+        break;
+
+      default:
+        // Fallback to simple circle
+        final paint = Paint()
+          ..color = adjustedColor.withValues(alpha: 0.6 * alpha)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5;
+        canvas.drawCircle(center, size / 2, paint);
+    }
+  }
+
+  void _drawGalaxyWithAlpha(Canvas canvas, Offset center, double size, Color color, double alpha) {
+    // Outer glow
+    _drawOvalGlow(canvas, center, size * 2.5, size * 1.5, color, 8.0, opacity: 0.15 * alpha);
+
+    // Middle layer
+    _drawOvalGlow(canvas, center, size * 1.8, size * 1.2, color, 4.0, opacity: 0.4 * alpha);
+
+    // Add spiral arm hints for larger galaxies in quality mode
+    if (qualityConfig.enableEnhancedDsoSymbols && size > 10) {
+      _drawSpiralArmsWithAlpha(canvas, center, size, color, alpha);
+    }
+
+    // Bright core
+    _drawOvalGlow(canvas, center, size * 0.8, size * 0.5, color, 2.0, opacity: 0.8 * alpha);
+
+    // Central bright spot (always drawn)
+    final centerPaint = Paint()..color = Colors.white.withValues(alpha: 0.9 * alpha);
+    canvas.drawCircle(center, size * 0.15, centerPaint);
+  }
+
+  void _drawSpiralArmsWithAlpha(Canvas canvas, Offset center, double size, Color color, double alpha) {
+    final armPaint = Paint()
+      ..color = color.withValues(alpha: 0.15 * alpha)
+      ..strokeWidth = size * 0.06
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    if (qualityConfig.useBlurEffects) {
+      armPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+    }
+
+    for (final startAngle in [0.0, math.pi]) {
+      final path = Path();
+      var firstPoint = true;
+
+      for (var t = 0.0; t <= 1.8; t += 0.08) {
+        final r = size * 0.15 * math.exp(0.5 * t);
+        final angle = startAngle + t * 2.5;
+        final x = center.dx + r * math.cos(angle);
+        final y = center.dy + r * math.sin(angle) * 0.5;
+
+        if (firstPoint) {
+          path.moveTo(x, y);
+          firstPoint = false;
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+      canvas.drawPath(path, armPaint);
+    }
+  }
+
+  void _drawNebulaWithAlpha(Canvas canvas, Offset center, double size, Color color, DsoType type, double alpha) {
+    final random = math.Random(center.dx.toInt() + center.dy.toInt());
+
+    Color nebulaColor = color;
+    if (type == DsoType.emissionNebula || type == DsoType.hiiRegion) {
+      nebulaColor = Color.fromRGBO(255, 23, 68, alpha); // Pink/red for emission
+    } else if (type == DsoType.reflectionNebula) {
+      nebulaColor = Color.fromRGBO(68, 138, 255, alpha); // Blue for reflection
+    }
+
+    // Draw multiple overlapping circles for wispy effect
+    for (var i = 0; i < 5; i++) {
+      final offsetX = (random.nextDouble() - 0.5) * size * 0.5;
+      final offsetY = (random.nextDouble() - 0.5) * size * 0.5;
+      final circleSize = size * (0.4 + random.nextDouble() * 0.4);
+
+      final paint = Paint()
+        ..color = nebulaColor.withValues(alpha: (0.15 + random.nextDouble() * 0.1) * alpha);
+
+      if (qualityConfig.useBlurEffects) {
+        paint.maskFilter = MaskFilter.blur(BlurStyle.normal, circleSize * 0.4);
+      }
+
+      canvas.drawCircle(
+        Offset(center.dx + offsetX, center.dy + offsetY),
+        circleSize,
+        paint,
+      );
+    }
+  }
+
+  void _drawPlanetaryNebulaWithAlpha(Canvas canvas, Offset center, double size, Color color, double alpha) {
+    // Outer ring
+    final ringPaint = Paint()
+      ..color = color.withValues(alpha: 0.5 * alpha)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size * 0.15;
+
+    if (qualityConfig.useBlurEffects) {
+      ringPaint.maskFilter = MaskFilter.blur(BlurStyle.normal, size * 0.1);
+    }
+
+    canvas.drawCircle(center, size * 0.4, ringPaint);
+
+    // Central star
+    final starPaint = Paint()..color = Colors.white.withValues(alpha: 0.9 * alpha);
+    canvas.drawCircle(center, size * 0.1, starPaint);
+  }
+
+  void _drawOpenClusterWithAlpha(Canvas canvas, Offset center, double size, Color color, double alpha) {
+    final random = math.Random(center.dx.toInt() + center.dy.toInt());
+
+    // Draw scattered small stars
+    for (var i = 0; i < 8; i++) {
+      final angle = random.nextDouble() * 2 * math.pi;
+      final dist = random.nextDouble() * size * 0.4;
+      final starSize = 1.0 + random.nextDouble() * 1.5;
+
+      final starCenter = Offset(
+        center.dx + math.cos(angle) * dist,
+        center.dy + math.sin(angle) * dist,
+      );
+
+      final paint = Paint()..color = Colors.white.withValues(alpha: (0.6 + random.nextDouble() * 0.4) * alpha);
+      canvas.drawCircle(starCenter, starSize, paint);
+    }
+
+    // Faint boundary circle
+    final boundaryPaint = Paint()
+      ..color = color.withValues(alpha: 0.2 * alpha)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    canvas.drawCircle(center, size * 0.5, boundaryPaint);
+  }
+
+  void _drawGlobularClusterWithAlpha(Canvas canvas, Offset center, double size, Color color, double alpha) {
+    // Dense core glow
+    final corePaint = Paint()
+      ..color = color.withValues(alpha: 0.6 * alpha);
+
+    if (qualityConfig.useBlurEffects) {
+      corePaint.maskFilter = MaskFilter.blur(BlurStyle.normal, size * 0.3);
+    }
+
+    canvas.drawCircle(center, size * 0.3, corePaint);
+
+    // Outer halo
+    final haloPaint = Paint()
+      ..color = color.withValues(alpha: 0.2 * alpha);
+
+    if (qualityConfig.useBlurEffects) {
+      haloPaint.maskFilter = MaskFilter.blur(BlurStyle.normal, size * 0.5);
+    }
+
+    canvas.drawCircle(center, size * 0.5, haloPaint);
+
+    // Bright center point
+    final centerPaint = Paint()..color = Colors.white.withValues(alpha: 0.8 * alpha);
+    canvas.drawCircle(center, size * 0.1, centerPaint);
+  }
+
+  void _drawSupernovaWithAlpha(Canvas canvas, Offset center, double size, Color color, double alpha) {
+    // Bright central point
+    final centerPaint = Paint()..color = Colors.white.withValues(alpha: 0.95 * alpha);
+    canvas.drawCircle(center, size * 0.2, centerPaint);
+
+    // Diffraction spikes
+    final spikePaint = Paint()
+      ..color = color.withValues(alpha: 0.7 * alpha)
+      ..strokeWidth = 1.5
+      ..strokeCap = StrokeCap.round;
+
+    for (var angle = 0.0; angle < math.pi * 2; angle += math.pi / 2) {
+      final dx = math.cos(angle) * size * 0.6;
+      final dy = math.sin(angle) * size * 0.6;
+      canvas.drawLine(
+        Offset(center.dx - dx * 0.3, center.dy - dy * 0.3),
+        Offset(center.dx + dx, center.dy + dy),
+        spikePaint,
+      );
+    }
+
+    // Glow
+    final glowPaint = Paint()
+      ..color = color.withValues(alpha: 0.3 * alpha);
+
+    if (qualityConfig.useBlurEffects) {
+      glowPaint.maskFilter = MaskFilter.blur(BlurStyle.normal, size * 0.4);
+    }
+
+    canvas.drawCircle(center, size * 0.4, glowPaint);
   }
   
   void _drawDSOSymbol(Canvas canvas, Offset center, double size, DsoType type) {
@@ -2442,6 +2715,9 @@ class SkyCanvasPainter extends CustomPainter {
       return true;
     }
     if (popinAnimationPhase != oldDelegate.popinAnimationPhase) {
+      return true;
+    }
+    if (dsoPopinAnimationPhase != oldDelegate.dsoPopinAnimationPhase) {
       return true;
     }
     if (parallaxPanDelta != oldDelegate.parallaxPanDelta) {
