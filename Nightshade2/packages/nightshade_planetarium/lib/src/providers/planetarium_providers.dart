@@ -444,10 +444,23 @@ class SkyRenderConfigNotifier extends StateNotifier<SkyRenderConfig> {
   void togglePlanets() {
     state = state.copyWith(showPlanets: !state.showPlanets);
   }
+
+  void toggleGroundPlane() {
+    state = state.copyWith(showGroundPlane: !state.showGroundPlane);
+  }
 }
 
 final skyRenderConfigProvider = StateNotifierProvider<SkyRenderConfigNotifier, SkyRenderConfig>((ref) {
   return SkyRenderConfigNotifier();
+});
+
+/// Computed render config that combines the base config with the ground plane toggle
+/// This is the provider that should be used for actual rendering to ensure
+/// the ground plane visibility respects the HUD toggle.
+final effectiveSkyRenderConfigProvider = Provider<SkyRenderConfig>((ref) {
+  final config = ref.watch(skyRenderConfigProvider);
+  final showGroundPlane = ref.watch(showGroundPlaneProvider);
+  return config.copyWith(showGroundPlane: showGroundPlane);
 });
 
 // ============================================================================
