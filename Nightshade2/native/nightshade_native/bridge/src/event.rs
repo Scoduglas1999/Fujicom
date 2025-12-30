@@ -81,6 +81,22 @@ pub enum EventCategory {
     PolarAlignment,
 }
 
+/// Heartbeat status for device health monitoring
+#[frb]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HeartbeatStatus {
+    /// Device is responding normally
+    Healthy,
+    /// Device has failed some health checks but not yet marked disconnected
+    Degraded,
+    /// Device is not responding and marked as disconnected
+    Disconnected,
+    /// Attempting to reconnect to the device
+    Reconnecting,
+    /// Successfully reconnected after failures
+    Reconnected,
+}
+
 /// Equipment-specific events
 #[frb]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +135,35 @@ pub enum EquipmentEvent {
     CameraCoolingReached { temperature: f64 },
     CameraWarmingStarted,
     CameraWarmingCompleted,
+
+    // Heartbeat monitoring events
+    HeartbeatStarted {
+        device_type: String,
+        device_id: String,
+        interval_secs: u64,
+    },
+    HeartbeatStopped {
+        device_type: String,
+        device_id: String,
+    },
+    HeartbeatStatusChanged {
+        device_type: String,
+        device_id: String,
+        status: HeartbeatStatus,
+        consecutive_failures: u32,
+        last_rtt_ms: Option<u64>,
+    },
+    HeartbeatReconnecting {
+        device_type: String,
+        device_id: String,
+        attempt: u32,
+        max_attempts: u32,
+    },
+    HeartbeatReconnected {
+        device_type: String,
+        device_id: String,
+        after_attempts: u32,
+    },
 }
 
 /// Polar alignment error data

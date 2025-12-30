@@ -931,6 +931,86 @@ pub async fn api_stop_device_heartbeat(device_id: String) -> Result<(), Nightsha
         .map_err(|e| NightshadeError::OperationFailed(e))
 }
 
+/// Start heartbeat monitoring with custom configuration
+///
+/// This allows full control over the heartbeat behavior including:
+/// - Check interval and maximum interval after backoff
+/// - Number of failures before marking device as disconnected
+/// - Whether to attempt auto-reconnection
+/// - Reconnection attempt limits and delays
+///
+/// # Arguments
+/// * `device_id` - The unique identifier for the device
+/// * `interval_secs` - Base interval between heartbeats in seconds
+/// * `failure_threshold` - Number of consecutive failures before disconnect
+/// * `auto_reconnect` - Whether to attempt automatic reconnection
+/// * `max_reconnect_attempts` - Maximum reconnection attempts (0 = unlimited)
+pub async fn api_start_device_heartbeat_with_config(
+    device_id: String,
+    interval_secs: u64,
+    failure_threshold: u32,
+    auto_reconnect: bool,
+    max_reconnect_attempts: u32,
+) -> Result<(), NightshadeError> {
+    tracing::info!(
+        "Starting heartbeat with config for device: {} (interval={}s, threshold={}, auto_reconnect={}, max_attempts={})",
+        device_id,
+        interval_secs,
+        failure_threshold,
+        auto_reconnect,
+        max_reconnect_attempts
+    );
+
+    let config = crate::devices::HeartbeatConfig {
+        base_interval_secs: interval_secs,
+        max_interval_secs: interval_secs * 6, // 6x base for max backoff
+        failure_threshold,
+        backoff_multiplier: 2.0,
+        auto_reconnect,
+        max_reconnect_attempts,
+        reconnect_delay_secs: 5,
+    };
+
+    get_device_manager()
+        .start_heartbeat_with_config(&device_id, config)
+        .await
+        .map_err(|e| NightshadeError::OperationFailed(e))
+}
+
+/// Get the default heartbeat configuration for a device type
+///
+/// Returns the recommended heartbeat settings for the specified device type.
+/// Different device types have different optimal configurations based on
+/// their operational characteristics.
+///
+/// # Arguments
+/// * `device_type` - The type of device to get configuration for
+///
+/// # Returns
+/// A tuple of (interval_secs, max_interval_secs, failure_threshold, auto_reconnect)
+pub fn api_get_heartbeat_config_for_type(
+    device_type: DeviceType,
+) -> (u64, u64, u32, bool) {
+    let config = match device_type {
+        DeviceType::Camera => crate::devices::HeartbeatConfig::for_camera(),
+        DeviceType::Mount => crate::devices::HeartbeatConfig::for_mount(),
+        DeviceType::Focuser => crate::devices::HeartbeatConfig::for_focuser(),
+        DeviceType::FilterWheel => crate::devices::HeartbeatConfig::for_filter_wheel(),
+        DeviceType::Dome => crate::devices::HeartbeatConfig::for_dome(),
+        DeviceType::Rotator => crate::devices::HeartbeatConfig::for_rotator(),
+        DeviceType::Weather => crate::devices::HeartbeatConfig::for_weather(),
+        DeviceType::SafetyMonitor => crate::devices::HeartbeatConfig::for_safety_monitor(),
+        _ => crate::devices::HeartbeatConfig::default(),
+    };
+
+    (
+        config.base_interval_secs,
+        config.max_interval_secs,
+        config.failure_threshold,
+        config.auto_reconnect,
+    )
+}
+
 /// Check device health status
 ///
 /// Returns the last successful communication timestamp and whether
@@ -946,6 +1026,71 @@ pub async fn api_get_device_health(device_id: String) -> Result<(i64, bool), Nig
         .get_device_health(&device_id)
         .await
         .map_err(|e| NightshadeError::OperationFailed(e))
+}
+
+/// Detailed heartbeat status for a device
+#[derive(Debug, Clone)]
+#[flutter_rust_bridge::frb]
+pub struct DeviceHeartbeatInfo {
+    /// Device ID
+    pub device_id: String,
+    /// Device type (e.g., "Camera", "Mount")
+    pub device_type: String,
+    /// Whether heartbeat monitoring is currently active
+    pub heartbeat_active: bool,
+    /// Last successful communication timestamp (milliseconds since epoch)
+    pub last_successful_comm_ms: Option<i64>,
+    /// Current heartbeat interval in seconds
+    pub interval_secs: u64,
+    /// Maximum interval after backoff in seconds
+    pub max_interval_secs: u64,
+    /// Number of failures before marking disconnected
+    pub failure_threshold: u32,
+    /// Whether auto-reconnect is enabled
+    pub auto_reconnect: bool,
+    /// Maximum reconnection attempts (0 = unlimited)
+    pub max_reconnect_attempts: u32,
+}
+
+/// Get detailed heartbeat status for a device
+///
+/// Returns comprehensive information about the heartbeat monitoring status
+/// including configuration, last successful communication, and whether
+/// monitoring is active.
+///
+/// # Arguments
+/// * `device_id` - The unique identifier for the device
+///
+/// # Returns
+/// DeviceHeartbeatInfo with all heartbeat details
+pub async fn api_get_device_heartbeat_info(device_id: String) -> Result<DeviceHeartbeatInfo, NightshadeError> {
+    let manager = get_device_manager();
+
+    // Check if device exists and get its info using the public API
+    let device = manager.get_device(&device_id).await
+        .ok_or_else(|| NightshadeError::DeviceNotFound(device_id.clone()))?;
+
+    let device_type_enum = device.info.device_type.clone();
+
+    // Get device-type specific configuration
+    let config = crate::devices::HeartbeatConfig::for_device_type(&device_type_enum);
+
+    Ok(DeviceHeartbeatInfo {
+        device_id,
+        device_type: device_type_enum.as_str().to_string(),
+        heartbeat_active: device.heartbeat_active,
+        last_successful_comm_ms: device.last_successful_comm,
+        interval_secs: config.base_interval_secs,
+        max_interval_secs: config.max_interval_secs,
+        failure_threshold: config.failure_threshold,
+        auto_reconnect: config.auto_reconnect,
+        max_reconnect_attempts: config.max_reconnect_attempts,
+    })
+}
+
+/// Check if heartbeat monitoring is active for a device
+pub async fn api_is_heartbeat_active(device_id: String) -> Result<bool, NightshadeError> {
+    Ok(get_device_manager().is_heartbeat_active(&device_id).await)
 }
 
 // =============================================================================
@@ -1107,15 +1252,16 @@ pub async fn cancel_exposure(device_id: String) -> Result<(), NightshadeError> {
 
 /// Download last image from camera
 /// Returns the image stored by start_exposure/api_camera_start_exposure
+/// Reads from unified atomic storage to ensure consistency with raw data
 pub async fn get_last_image() -> Result<Option<CapturedImageResult>, NightshadeError> {
     tracing::info!("API: get_last_image called");
 
-    // Return the stored image from the last exposure
-    let storage = get_last_image_storage().read().await;
+    // Return the stored image from the last exposure (using unified atomic storage)
+    let storage = get_unified_image_storage().read().await;
     match &*storage {
-        Some(image) => {
-            tracing::info!("Returning stored image: {}x{}", image.width, image.height);
-            Ok(Some(image.clone()))
+        Some(data) => {
+            tracing::info!("Returning stored image: {}x{}", data.display.width, data.display.height);
+            Ok(Some(data.display.clone()))
         }
         None => {
             tracing::warn!("No image available - exposure may not have completed");
@@ -2283,20 +2429,6 @@ pub struct ImageStatsResult {
     pub star_count: u32,
 }
 
-/// Last captured image storage
-static LAST_CAPTURED_IMAGE: OnceLock<Arc<RwLock<Option<CapturedImageResult>>>> = OnceLock::new();
-
-fn get_last_image_storage() -> &'static Arc<RwLock<Option<CapturedImageResult>>> {
-    LAST_CAPTURED_IMAGE.get_or_init(|| Arc::new(RwLock::new(None)))
-}
-
-/// Raw image data storage (u16 data for FITS saving)
-static LAST_RAW_IMAGE_DATA: OnceLock<Arc<RwLock<Option<Vec<u16>>>>> = OnceLock::new();
-
-fn get_last_raw_data_storage() -> &'static Arc<RwLock<Option<Vec<u16>>>> {
-    LAST_RAW_IMAGE_DATA.get_or_init(|| Arc::new(RwLock::new(None)))
-}
-
 /// Raw image info with metadata - used by sequencer for actual image analysis
 /// This preserves the original 16-bit sensor data needed for HFR calculation, plate solving, etc.
 #[derive(Debug, Clone)]
@@ -2308,11 +2440,36 @@ pub struct RawImageInfo {
     pub bayer_offset: Option<(i32, i32)>, // Bayer pattern offset for color sensors
 }
 
-/// Raw image info storage
-static LAST_RAW_IMAGE_INFO: OnceLock<Arc<RwLock<Option<RawImageInfo>>>> = OnceLock::new();
+/// Unified captured image data - contains all image data for atomic updates
+/// This ensures the UI never sees inconsistent state between raw data and display data
+#[derive(Debug, Clone)]
+pub struct CapturedImageData {
+    /// Display-ready image result (8-bit for UI)
+    pub display: CapturedImageResult,
+    /// Raw 16-bit image info with metadata (for FITS saving, HFR, etc.)
+    pub raw_info: RawImageInfo,
+}
 
-fn get_last_raw_image_info_storage() -> &'static Arc<RwLock<Option<RawImageInfo>>> {
-    LAST_RAW_IMAGE_INFO.get_or_init(|| Arc::new(RwLock::new(None)))
+/// Unified image storage - all image data updated atomically
+/// This prevents race conditions where the UI might read raw data that doesn't match display data
+static UNIFIED_IMAGE_STORAGE: OnceLock<Arc<RwLock<Option<CapturedImageData>>>> = OnceLock::new();
+
+fn get_unified_image_storage() -> &'static Arc<RwLock<Option<CapturedImageData>>> {
+    UNIFIED_IMAGE_STORAGE.get_or_init(|| Arc::new(RwLock::new(None)))
+}
+
+/// Store captured image data atomically
+/// This ensures all image-related data (display, raw, metadata) is updated together,
+/// preventing race conditions where the UI could see inconsistent state.
+async fn store_captured_image_atomically(
+    display: CapturedImageResult,
+    raw_info: RawImageInfo,
+) {
+    let mut storage = get_unified_image_storage().write().await;
+    *storage = Some(CapturedImageData {
+        display,
+        raw_info,
+    });
 }
 
 /// Start a camera exposure
@@ -2375,46 +2532,36 @@ pub async fn api_camera_start_exposure(
         let (raw_data, display_data, histogram, stats, star_count) =
             generate_simulated_image(sensor_width, sensor_height, gain, duration_secs);
 
-        // Store the raw image data (legacy)
-        {
-            let mut raw_storage = get_last_raw_data_storage().write().await;
-            *raw_storage = Some(raw_data.clone());
-        }
+        // Store all image data atomically to prevent race conditions
+        // This ensures the UI never sees inconsistent state between raw and display data
+        let display_result = CapturedImageResult {
+            width: sensor_width,
+            height: sensor_height,
+            display_data,
+            histogram,
+            stats: ImageStatsResult {
+                min: stats.min,
+                max: stats.max,
+                mean: stats.mean,
+                median: stats.median,
+                std_dev: stats.std_dev,
+                hfr: Some(2.5 + (rand::random::<f64>() - 0.5) * 0.5), // Simulated HFR
+                star_count,
+            },
+            exposure_time: duration_secs,
+            timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+            is_color: false,  // Simulated images are grayscale
+        };
 
-        // Store the raw image info with metadata (used by sequencer)
-        {
-            let mut raw_info_storage = get_last_raw_image_info_storage().write().await;
-            *raw_info_storage = Some(RawImageInfo {
-                width: sensor_width,
-                height: sensor_height,
-                data: raw_data,
-                sensor_type: Some("Monochrome".to_string()), // Simulated camera is mono
-                bayer_offset: None,
-            });
-        }
+        let raw_info = RawImageInfo {
+            width: sensor_width,
+            height: sensor_height,
+            data: raw_data,
+            sensor_type: Some("Monochrome".to_string()), // Simulated camera is mono
+            bayer_offset: None,
+        };
 
-        // Store the captured image
-        {
-            let mut storage = get_last_image_storage().write().await;
-            *storage = Some(CapturedImageResult {
-                width: sensor_width,
-                height: sensor_height,
-                display_data,
-                histogram,
-                stats: ImageStatsResult {
-                    min: stats.min,
-                    max: stats.max,
-                    mean: stats.mean,
-                    median: stats.median,
-                    std_dev: stats.std_dev,
-                    hfr: Some(2.5 + (rand::random::<f64>() - 0.5) * 0.5), // Simulated HFR
-                    star_count,
-                },
-                exposure_time: duration_secs,
-                timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
-                is_color: false,  // Simulated images are grayscale
-            });
-        }
+        store_captured_image_atomically(display_result, raw_info).await;
         
         // Update camera state back to idle
         {
@@ -2579,46 +2726,36 @@ pub async fn api_camera_start_exposure(
             histogram[pixel as usize] += 1;
         }
 
-        // Store the raw image data (legacy)
-        {
-            let mut raw_storage = get_last_raw_data_storage().write().await;
-            *raw_storage = Some(seq_image.data.clone());
-        }
+        // Store all image data atomically to prevent race conditions
+        // This ensures the UI never sees inconsistent state between raw and display data
+        let display_result = CapturedImageResult {
+            width: seq_image.width,
+            height: seq_image.height,
+            display_data,
+            histogram,
+            stats: ImageStatsResult {
+                min: stats.min,
+                max: stats.max,
+                mean: stats.mean,
+                median: stats.median,
+                std_dev: stats.std_dev,
+                hfr: None,
+                star_count,
+            },
+            exposure_time: duration_secs,
+            timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+            is_color,
+        };
 
-        // Store the raw image info with metadata (used by sequencer)
-        {
-            let mut raw_info_storage = get_last_raw_image_info_storage().write().await;
-            *raw_info_storage = Some(RawImageInfo {
-                width: seq_image.width,
-                height: seq_image.height,
-                data: seq_image.data.clone(),
-                sensor_type: seq_image.sensor_type.clone(),
-                bayer_offset: seq_image.bayer_offset,
-            });
-        }
+        let raw_info = RawImageInfo {
+            width: seq_image.width,
+            height: seq_image.height,
+            data: seq_image.data.clone(),
+            sensor_type: seq_image.sensor_type.clone(),
+            bayer_offset: seq_image.bayer_offset,
+        };
 
-        // Store the captured image
-        {
-            let mut storage = get_last_image_storage().write().await;
-            *storage = Some(CapturedImageResult {
-                width: seq_image.width,
-                height: seq_image.height,
-                display_data,
-                histogram,
-                stats: ImageStatsResult {
-                    min: stats.min,
-                    max: stats.max,
-                    mean: stats.mean,
-                    median: stats.median,
-                    std_dev: stats.std_dev,
-                    hfr: None,
-                    star_count,
-                },
-                exposure_time: duration_secs,
-                timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
-                is_color,
-            });
-        }
+        store_captured_image_atomically(display_result, raw_info).await;
 
         // Note: ExposureComplete event is published by UnifiedDeviceOps
         tracing::info!("Real camera exposure complete, {} stars detected", star_count);
@@ -2626,15 +2763,16 @@ pub async fn api_camera_start_exposure(
     }
 }
 
-/// Get the last captured image
+/// Get the last captured image (display-ready format)
+/// Reads from unified atomic storage to ensure consistency with raw data
 pub async fn api_get_last_image() -> Result<CapturedImageResult, NightshadeError> {
     tracing::info!("API: api_get_last_image called");
-    let storage = get_last_image_storage().read().await;
+    let storage = get_unified_image_storage().read().await;
     match &*storage {
-        Some(img) => {
+        Some(data) => {
             tracing::info!("API: Returning stored image {}x{}, display_data size: {} bytes",
-                img.width, img.height, img.display_data.len());
-            Ok(img.clone())
+                data.display.width, data.display.height, data.display.display_data.len());
+            Ok(data.display.clone())
         }
         None => {
             tracing::warn!("API: No image available in storage");
@@ -2645,18 +2783,22 @@ pub async fn api_get_last_image() -> Result<CapturedImageResult, NightshadeError
 
 /// Get the last captured raw image data (u16)
 /// This is used for saving FITS files with original bit depth
+/// Reads from unified atomic storage to ensure consistency with display data
 pub async fn api_get_last_raw_image_data() -> Result<Vec<u16>, NightshadeError> {
-    let storage = get_last_raw_data_storage().read().await;
-    storage.clone().ok_or(NightshadeError::NoImageAvailable)
+    let storage = get_unified_image_storage().read().await;
+    storage.as_ref()
+        .map(|data| data.raw_info.data.clone())
+        .ok_or(NightshadeError::NoImageAvailable)
 }
 
 /// Get the last captured raw image info with full metadata
 /// This is used by the sequencer for HFR calculation, plate solving, and other analysis
 /// that requires original 16-bit sensor data (not display-stretched 8-bit data)
+/// Reads from unified atomic storage to ensure consistency with display data
 #[flutter_rust_bridge::frb(ignore)]
 pub async fn get_last_raw_image_info() -> Result<Option<RawImageInfo>, NightshadeError> {
-    let storage = get_last_raw_image_info_storage().read().await;
-    Ok(storage.clone())
+    let storage = get_unified_image_storage().read().await;
+    Ok(storage.as_ref().map(|data| data.raw_info.clone()))
 }
 
 /// Cancel current exposure
@@ -4959,6 +5101,7 @@ pub fn api_create_filter_node(
     let config = FilterConfig {
         filter_name,
         filter_index: None,
+        timeout_secs: None, // Use default timeout
     };
     
     let node = NodeDefinition {
@@ -5505,7 +5648,7 @@ fn get_polar_align_cancel() -> &'static PolarAtomicBool {
 /// Emit a polar alignment status update (JSON-serializable for Dart)
 fn emit_polar_status(status: &str, phase: &str, point: i32) {
     tracing::info!("Polar alignment: {} (phase={}, point={})", status, phase, point);
-    get_state().publish_event(create_event(
+    get_state().publish_event(create_event_auto_id(
         EventSeverity::Info,
         EventCategory::PolarAlignment,
         EventPayload::PolarAlignmentStatus(PolarAlignmentStatus {
@@ -5518,7 +5661,7 @@ fn emit_polar_status(status: &str, phase: &str, point: i32) {
 
 /// Emit polar alignment error update
 fn emit_polar_error(az: f64, alt: f64, total: f64, cur_ra: f64, cur_dec: f64, tgt_ra: f64, tgt_dec: f64) {
-    get_state().publish_event(create_event(
+    get_state().publish_event(create_event_auto_id(
         EventSeverity::Info,
         EventCategory::PolarAlignment,
         EventPayload::PolarAlignment(PolarAlignmentEvent {
@@ -5529,6 +5672,74 @@ fn emit_polar_error(az: f64, alt: f64, total: f64, cur_ra: f64, cur_dec: f64, tg
             current_dec: cur_dec,
             target_ra: tgt_ra,
             target_dec: tgt_dec,
+        }),
+    ));
+}
+
+/// Emit polar alignment image for UI display
+/// Encodes the display data to JPEG for efficient transmission
+fn emit_polar_image(
+    image: &CapturedImageResult,
+    point: i32,
+    phase: &str,
+    solved_ra: Option<f64>,
+    solved_dec: Option<f64>,
+) {
+    use image::ImageEncoder;
+
+    // Encode display_data to JPEG
+    let (color_type, jpeg_data) = if image.is_color {
+        // RGB8 data
+        let mut buffer = Vec::new();
+        {
+            let mut cursor = std::io::Cursor::new(&mut buffer);
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 85);
+            if let Err(e) = encoder.write_image(
+                &image.display_data,
+                image.width as u32,
+                image.height as u32,
+                image::ColorType::Rgb8,
+            ) {
+                tracing::warn!("Failed to encode polar alignment image: {}", e);
+                return;
+            }
+        }
+        (image::ColorType::Rgb8, buffer)
+    } else {
+        // Grayscale (L8) data
+        let mut buffer = Vec::new();
+        {
+            let mut cursor = std::io::Cursor::new(&mut buffer);
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut cursor, 85);
+            if let Err(e) = encoder.write_image(
+                &image.display_data,
+                image.width as u32,
+                image.height as u32,
+                image::ColorType::L8,
+            ) {
+                tracing::warn!("Failed to encode polar alignment image: {}", e);
+                return;
+            }
+        }
+        (image::ColorType::L8, buffer)
+    };
+
+    tracing::debug!(
+        "Emitting polar alignment image: {}x{}, {:?}, point={}, phase={}, solved={:?}",
+        image.width, image.height, color_type, point, phase, solved_ra.is_some()
+    );
+
+    get_state().publish_event(create_event_auto_id(
+        EventSeverity::Info,
+        EventCategory::PolarAlignment,
+        EventPayload::PolarAlignmentImage(PolarAlignmentImageEvent {
+            image_data: jpeg_data,
+            width: image.width as u32,
+            height: image.height as u32,
+            solved_ra,
+            solved_dec,
+            point,
+            phase: phase.to_string(),
         }),
     ));
 }
@@ -5658,15 +5869,8 @@ async fn run_polar_alignment(
         let image = api_get_last_image().await
             .map_err(|e| format!("Failed to get image: {:?}", e))?;
 
-        // Emit image ready event so UI can display preview
-        get_state().publish_event(create_event(
-            EventSeverity::Info,
-            EventCategory::Imaging,
-            EventPayload::Imaging(ImagingEvent::ImageReady {
-                width: image.width,
-                height: image.height,
-            }),
-        ));
+        // Emit polar alignment image (before plate solve, no coordinates yet)
+        emit_polar_image(&image, point as i32, "measuring", None, None);
 
         // Save temp file for plate solving
         let temp_dir = std::env::temp_dir();
@@ -5699,9 +5903,13 @@ async fn run_polar_alignment(
         let _ = std::fs::remove_file(&temp_path);
 
         if solve_result.success {
-            solved_points.push((solve_result.ra * 15.0, solve_result.dec)); // RA hours to degrees
+            let ra_degrees = solve_result.ra * 15.0;  // RA hours to degrees
+            solved_points.push((ra_degrees, solve_result.dec));
             tracing::info!("Point {} solved: RA={:.4}h ({:.4}°), Dec={:.4}°",
-                point, solve_result.ra, solve_result.ra * 15.0, solve_result.dec);
+                point, solve_result.ra, ra_degrees, solve_result.dec);
+
+            // Emit image again with plate solve coordinates
+            emit_polar_image(&image, point as i32, "measuring", Some(ra_degrees), Some(solve_result.dec));
         } else {
             return Err(format!("Plate solve failed for point {}: {:?}", point, solve_result.error));
         }
@@ -5802,15 +6010,8 @@ async fn run_polar_alignment(
             }
         };
 
-        // Emit image ready event so UI can display preview
-        get_state().publish_event(create_event(
-            EventSeverity::Info,
-            EventCategory::Imaging,
-            EventPayload::Imaging(ImagingEvent::ImageReady {
-                width: image.width,
-                height: image.height,
-            }),
-        ));
+        // Emit polar alignment image (adjustment phase, no coordinates yet)
+        emit_polar_image(&image, 0, "adjusting", None, None);
 
         let temp_dir = std::env::temp_dir();
         let temp_path = temp_dir.join("polar_align_adjust.fits");
@@ -5867,6 +6068,11 @@ async fn run_polar_alignment(
             // Reset failure counter on success
             consecutive_failures = 0;
 
+            let ra_degrees = solve_result.ra * 15.0;  // hours to degrees
+
+            // Emit image again with plate solve coordinates
+            emit_polar_image(&image, 0, "adjusting", Some(ra_degrees), Some(solve_result.dec));
+
             // Calculate error relative to calculated pole position
             let alt_error = (pole_dec - center_dec) * 60.0; // arcminutes
             let az_error = (0.0 - center_ra) * center_dec.to_radians().cos() * 60.0;
@@ -5877,7 +6083,7 @@ async fn run_polar_alignment(
                 az_error,
                 alt_error,
                 total_error,
-                solve_result.ra * 15.0, // hours to degrees
+                ra_degrees,
                 solve_result.dec,
                 center_ra,
                 pole_dec,
