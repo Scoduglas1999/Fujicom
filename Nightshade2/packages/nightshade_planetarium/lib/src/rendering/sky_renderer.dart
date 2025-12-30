@@ -37,6 +37,7 @@ class SkyRenderConfig {
   final bool showMoon;
   final bool showPlanets;
   final bool showGroundPlane;
+  final bool showMeridian;
   final Color groundColorDark;
   final Color groundColorLight;
   final Color horizonGlowColor;
@@ -66,6 +67,7 @@ class SkyRenderConfig {
     this.showMoon = true,
     this.showPlanets = true,
     this.showGroundPlane = true,
+    this.showMeridian = false,
     this.groundColorDark = const Color(0xFF0A0805),
     this.groundColorLight = const Color(0xFF1A1510),
     this.horizonGlowColor = const Color(0xFF2A2015),
@@ -96,6 +98,7 @@ class SkyRenderConfig {
     bool? showMoon,
     bool? showPlanets,
     bool? showGroundPlane,
+    bool? showMeridian,
     Color? groundColorDark,
     Color? groundColorLight,
     Color? horizonGlowColor,
@@ -125,6 +128,7 @@ class SkyRenderConfig {
       showMoon: showMoon ?? this.showMoon,
       showPlanets: showPlanets ?? this.showPlanets,
       showGroundPlane: showGroundPlane ?? this.showGroundPlane,
+      showMeridian: showMeridian ?? this.showMeridian,
       groundColorDark: groundColorDark ?? this.groundColorDark,
       groundColorLight: groundColorLight ?? this.groundColorLight,
       horizonGlowColor: horizonGlowColor ?? this.horizonGlowColor,
@@ -267,11 +271,18 @@ class SkyCanvasPainter extends CustomPainter {
       if (config.showAltAzGrid) {
         _drawAltAzGrid(canvas, size, center, scale);
       }
+      // Draw zenith marker when grid is shown
+      _drawZenithMarker(canvas, size, center, scale);
     }
-    
+
     // Draw ecliptic
     if (config.showEcliptic) {
       _drawEcliptic(canvas, size, center, scale);
+    }
+
+    // Draw meridian line
+    if (config.showMeridian) {
+      _drawMeridianLine(canvas, size, center, scale);
     }
 
     // Draw ground plane (before horizon line so horizon draws on top)
@@ -499,19 +510,44 @@ class SkyCanvasPainter extends CustomPainter {
       ..color = config.gridColor
       ..strokeWidth = 0.5
       ..style = PaintingStyle.stroke;
-    
-    // Draw RA lines (every 2 hours = 30 degrees)
-    for (var ra = 0; ra < 24; ra += 2) {
+
+    final fov = viewState.fieldOfView;
+
+    // Adaptive grid spacing based on FOV
+    double raSpacing;   // hours
+    double decSpacing;  // degrees
+    double decStep;     // interpolation step
+
+    if (fov > 60) {
+      raSpacing = 2.0;   // Every 2 hours (30 deg)
+      decSpacing = 30.0;
+      decStep = 5.0;
+    } else if (fov > 30) {
+      raSpacing = 1.0;   // Every hour (15 deg)
+      decSpacing = 15.0;
+      decStep = 3.0;
+    } else if (fov > 10) {
+      raSpacing = 0.5;   // Every 30 min
+      decSpacing = 10.0;
+      decStep = 2.0;
+    } else {
+      raSpacing = 0.25;  // Every 15 min
+      decSpacing = 5.0;
+      decStep = 1.0;
+    }
+
+    // Draw RA lines with adaptive spacing
+    for (var ra = 0.0; ra < 24; ra += raSpacing) {
       final path = Path();
       var firstPoint = true;
-      
-      for (var dec = -90.0; dec <= 90; dec += 5) {
+
+      for (var dec = -90.0; dec <= 90; dec += decStep) {
         final offset = _celestialToScreen(
-          CelestialCoordinate(ra: ra.toDouble(), dec: dec),
+          CelestialCoordinate(ra: ra, dec: dec),
           center,
           scale,
         );
-        
+
         if (offset != null && _isInView(offset, size)) {
           if (firstPoint) {
             path.moveTo(offset.dx, offset.dy);
@@ -523,22 +559,23 @@ class SkyCanvasPainter extends CustomPainter {
           firstPoint = true;
         }
       }
-      
+
       canvas.drawPath(path, paint);
     }
-    
-    // Draw Dec lines (every 30 degrees)
-    for (var dec = -60; dec <= 60; dec += 30) {
+
+    // Draw Dec lines with adaptive spacing
+    for (var dec = -90.0 + decSpacing; dec < 90; dec += decSpacing) {
       final path = Path();
       var firstPoint = true;
-      
-      for (var ra = 0.0; ra <= 24; ra += 0.5) {
+
+      final raStep = fov > 30 ? 0.5 : 0.25;
+      for (var ra = 0.0; ra <= 24; ra += raStep) {
         final offset = _celestialToScreen(
-          CelestialCoordinate(ra: ra, dec: dec.toDouble()),
+          CelestialCoordinate(ra: ra, dec: dec),
           center,
           scale,
         );
-        
+
         if (offset != null && _isInView(offset, size)) {
           if (firstPoint) {
             path.moveTo(offset.dx, offset.dy);
@@ -550,8 +587,77 @@ class SkyCanvasPainter extends CustomPainter {
           firstPoint = true;
         }
       }
-      
+
       canvas.drawPath(path, paint);
+    }
+
+    // Draw grid labels at major intersections when zoomed out
+    if (fov > 20) {
+      _drawGridLabels(canvas, size, center, scale, raSpacing, decSpacing);
+    }
+  }
+
+  void _drawGridLabels(Canvas canvas, Size size, Offset center, double scale, double raSpacing, double decSpacing) {
+    final labelPaint = TextPainter(
+      textDirection: TextDirection.ltr,
+    );
+
+    // Draw RA labels along dec=0 (celestial equator)
+    for (var ra = 0.0; ra < 24; ra += raSpacing * 2) {
+      final offset = _celestialToScreen(
+        CelestialCoordinate(ra: ra, dec: 0),
+        center,
+        scale,
+      );
+
+      if (offset != null && _isInView(offset, size)) {
+        final hours = ra.floor();
+        final minutes = ((ra - hours) * 60).round();
+        final label = minutes == 0 ? '${hours}h' : '${hours}h${minutes}m';
+
+        labelPaint.text = TextSpan(
+          text: label,
+          style: TextStyle(
+            color: config.gridColor.withValues(alpha: 0.7),
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+          ),
+        );
+        labelPaint.layout();
+        labelPaint.paint(
+          canvas,
+          offset + Offset(-labelPaint.width / 2, 4),
+        );
+      }
+    }
+
+    // Draw Dec labels along RA=0
+    for (var dec = -60.0; dec <= 60; dec += decSpacing) {
+      if (dec == 0) continue; // Skip equator label to avoid overlap
+
+      final offset = _celestialToScreen(
+        CelestialCoordinate(ra: 0, dec: dec),
+        center,
+        scale,
+      );
+
+      if (offset != null && _isInView(offset, size)) {
+        final label = dec > 0 ? '+${dec.toInt()}' : '${dec.toInt()}';
+
+        labelPaint.text = TextSpan(
+          text: label,
+          style: TextStyle(
+            color: config.gridColor.withValues(alpha: 0.7),
+            fontSize: 10,
+            fontWeight: FontWeight.w500,
+          ),
+        );
+        labelPaint.layout();
+        labelPaint.paint(
+          canvas,
+          offset + Offset(4, -labelPaint.height / 2),
+        );
+      }
     }
   }
   
@@ -636,17 +742,79 @@ class SkyCanvasPainter extends CustomPainter {
     
     canvas.drawPath(path, paint);
   }
-  
+
+  void _drawMeridianLine(Canvas canvas, Size size, Offset center, double scale) {
+    if (!config.showMeridian) return;
+
+    final lst = AstronomyCalculations.localSiderealTime(observationTime, longitude);
+
+    // Draw line from horizon to zenith along the meridian (azimuth 0/180)
+    final path = Path();
+    var firstPoint = true;
+
+    for (var alt = 0.0; alt <= 90; alt += 2) {
+      final (ra, dec) = AstronomyCalculations.horizontalToEquatorial(
+        altDeg: alt,
+        azDeg: 0.0,  // North meridian
+        latitudeDeg: latitude,
+        lstHours: lst,
+      );
+
+      final pos = _celestialToScreen(CelestialCoordinate(ra: ra / 15, dec: dec), center, scale);
+      if (pos != null && _isInView(pos, size)) {
+        if (firstPoint) {
+          path.moveTo(pos.dx, pos.dy);
+          firstPoint = false;
+        } else {
+          path.lineTo(pos.dx, pos.dy);
+        }
+      } else {
+        firstPoint = true;
+      }
+    }
+
+    // Also draw the south meridian
+    firstPoint = true;
+    for (var alt = 0.0; alt <= 90; alt += 2) {
+      final (ra, dec) = AstronomyCalculations.horizontalToEquatorial(
+        altDeg: alt,
+        azDeg: 180.0,  // South meridian
+        latitudeDeg: latitude,
+        lstHours: lst,
+      );
+
+      final pos = _celestialToScreen(CelestialCoordinate(ra: ra / 15, dec: dec), center, scale);
+      if (pos != null && _isInView(pos, size)) {
+        if (firstPoint) {
+          path.moveTo(pos.dx, pos.dy);
+          firstPoint = false;
+        } else {
+          path.lineTo(pos.dx, pos.dy);
+        }
+      } else {
+        firstPoint = true;
+      }
+    }
+
+    final paint = Paint()
+      ..color = Colors.green.withValues(alpha: 0.4)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawPath(path, paint);
+  }
+
   void _drawHorizon(Canvas canvas, Size size, Offset center, double scale) {
     final paint = Paint()
       ..color = config.horizonColor
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
-    
+
     final lst = AstronomyCalculations.localSiderealTime(observationTime, longitude);
     final path = Path();
     var firstPoint = true;
-    
+
     for (var az = 0.0; az <= 360; az += 2) {
       final (ra, dec) = AstronomyCalculations.horizontalToEquatorial(
         altDeg: 0,
