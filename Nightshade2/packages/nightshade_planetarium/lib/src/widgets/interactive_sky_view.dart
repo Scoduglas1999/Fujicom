@@ -421,23 +421,34 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
     // Notify coordinate tap
     widget.onCoordinateTapped?.call(coord);
 
-    // Try to find a nearby object using FOV-filtered objects
+    // Try to find a nearby object using FOV-filtered objects (same as rendering)
     final stars = ref.read(fovFilteredStarsProvider).valueOrNull ?? [];
     final dsos = ref.read(fovFilteredDsosProvider).valueOrNull ?? [];
 
     CelestialObject? nearestObject;
     double nearestDistance = double.infinity;
 
-    // Base search radius in degrees - adaptive to FOV with sensible bounds
-    // At 60 deg FOV, search ~2 degrees; at 5 deg FOV, search ~0.3 degrees
-    final baseSearchRadius = (viewState.fieldOfView / 30).clamp(0.3, 3.0);
+    // Minimum hit radius in screen pixels - ensures all objects are tappable
+    const double minHitRadiusPixels = 8.0;
+
+    // Calculate scale factor for converting degrees to screen pixels
+    final scale = math.min(size.width, size.height) / 2 / (viewState.fieldOfView / 2);
+
+    // Convert min hit radius from pixels to degrees for angular comparison
+    final minHitRadiusDegrees = minHitRadiusPixels / scale;
 
     for (final star in stars) {
       final distance = _angularDistance(coord, star.coordinates);
-      // Bright stars (mag < 2) get larger hitbox (1.5x) since they're more visible
+
+      // Calculate hit radius based on magnitude
+      // Brighter stars (lower magnitude) get larger hit targets
       final starMag = star.magnitude ?? 6.0;
-      final starRadius = baseSearchRadius * (starMag < 2.0 ? 1.5 : 1.0);
-      if (distance < starRadius && distance < nearestDistance) {
+
+      // Base radius scales with brightness: mag -1 = 3x, mag 0 = 2.5x, mag 2 = 2x, mag 6 = 1x
+      final brightnessMultiplier = math.max(1.0, 2.5 - (starMag / 4.0));
+      final hitRadiusDegrees = math.max(minHitRadiusDegrees, minHitRadiusDegrees * brightnessMultiplier);
+
+      if (distance < hitRadiusDegrees && distance < nearestDistance) {
         nearestDistance = distance;
         nearestObject = star;
       }
@@ -445,16 +456,25 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
 
     for (final dso in dsos) {
       final distance = _angularDistance(coord, dso.coordinates);
+
       // DSOs get hitbox based on their actual angular size
       final dsoSizeDeg = (dso.sizeArcMin ?? 5.0) / 60.0;
-      // Use at least base radius, or half the object's size (whichever is larger)
-      final dsoRadius = math.max(baseSearchRadius, dsoSizeDeg * 0.5);
-      if (distance < dsoRadius && distance < nearestDistance) {
+
+      // Brighter DSOs (lower magnitude) get larger hit targets
+      final dsoMag = dso.magnitude ?? 10.0;
+      final brightnessMultiplier = math.max(1.0, 2.0 - (dsoMag / 10.0));
+
+      // Use at least minHitRadius, or half the object's angular size (whichever is larger)
+      // Then apply brightness multiplier
+      final baseRadius = math.max(minHitRadiusDegrees, dsoSizeDeg * 0.5);
+      final hitRadiusDegrees = baseRadius * brightnessMultiplier;
+
+      if (distance < hitRadiusDegrees && distance < nearestDistance) {
         nearestDistance = distance;
         nearestObject = dso;
       }
     }
-    
+
     if (nearestObject != null) {
       ref.read(selectedObjectProvider.notifier).selectObject(nearestObject);
       widget.onObjectSelected?.call(nearestObject);
@@ -462,7 +482,7 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
       ref.read(selectedObjectProvider.notifier).selectCoordinates(coord);
       widget.onObjectSelected?.call(null);
     }
-    
+
     // Always call the position callback for popup handling
     widget.onObjectTapped?.call(nearestObject, coord, position);
   }
