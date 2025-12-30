@@ -516,6 +516,41 @@ final renderQualityProvider = StateNotifierProvider<RenderQualityNotifier, Rende
   return RenderQualityNotifier();
 });
 
+/// Computed magnitude limits based on current FOV
+/// Returns (starMagLimit, dsoMagLimit)
+///
+/// As the user zooms in (narrower FOV), fainter objects become visible.
+/// This provides a more natural experience where zooming reveals more detail.
+final dynamicMagnitudeLimitsProvider = Provider<(double, double)>((ref) {
+  final viewState = ref.watch(skyViewStateProvider);
+  final quality = ref.watch(renderQualityProvider);
+  final fov = viewState.fieldOfView;
+
+  // Base limits from quality tier
+  final baseStarLimit = quality.starMagnitudeLimit;
+  final baseDsoLimit = quality.dsoMagnitudeLimit;
+
+  // Scale limits based on FOV (narrower FOV = deeper limits)
+  // FOV 90°+ = base limits, FOV 5° = base + 4.5 magnitudes
+  double fovFactor;
+  if (fov >= 90) {
+    fovFactor = 0.0;
+  } else if (fov >= 60) {
+    fovFactor = 1.0;
+  } else if (fov >= 30) {
+    fovFactor = 2.0;
+  } else if (fov >= 15) {
+    fovFactor = 3.0;
+  } else {
+    fovFactor = 4.5;
+  }
+
+  return (
+    (baseStarLimit + fovFactor).clamp(4.5, 12.0),
+    (baseDsoLimit + fovFactor).clamp(8.0, 16.0),
+  );
+});
+
 // ============================================================================
 // Catalog Providers
 // ============================================================================
