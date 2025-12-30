@@ -660,7 +660,60 @@ class SkyCanvasPainter extends CustomPainter {
       }
     }
   }
-  
+
+  void _drawZenithMarker(Canvas canvas, Size size, Offset center, double scale) {
+    // Calculate zenith position (altitude 90 degrees)
+    final lst = AstronomyCalculations.localSiderealTime(observationTime, longitude);
+    final (ra, dec) = AstronomyCalculations.horizontalToEquatorial(
+      altDeg: 90.0,
+      azDeg: 0.0,
+      latitudeDeg: latitude,
+      lstHours: lst,
+    );
+
+    final zenithPos = _celestialToScreen(
+      CelestialCoordinate(ra: ra / 15, dec: dec),
+      center,
+      scale,
+    );
+    if (zenithPos == null || !_isInView(zenithPos, size)) return;
+
+    // Draw crosshair
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.4)
+      ..strokeWidth = 1.0;
+
+    const length = 12.0;
+    canvas.drawLine(
+      zenithPos - const Offset(length, 0),
+      zenithPos + const Offset(length, 0),
+      paint,
+    );
+    canvas.drawLine(
+      zenithPos - const Offset(0, length),
+      zenithPos + const Offset(0, length),
+      paint,
+    );
+
+    // Draw "Z" label
+    final labelPaint = TextPainter(
+      text: TextSpan(
+        text: 'Z',
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.6),
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    labelPaint.layout();
+    labelPaint.paint(
+      canvas,
+      zenithPos + Offset(length + 4, -labelPaint.height / 2),
+    );
+  }
+
   void _drawAltAzGrid(Canvas canvas, Size size, Offset center, double scale) {
     final paint = Paint()
       ..color = config.gridColor.withValues(alpha: 0.3)
