@@ -47,3 +47,4 @@ export 'src/widgets/framing_view.dart';
 export 'src/widgets/time_control_panel.dart';
 export 'src/widgets/object_details_panel.dart';
 export 'src/widgets/compass_hud.dart';
+export 'src/widgets/sky_minimap.dart';
