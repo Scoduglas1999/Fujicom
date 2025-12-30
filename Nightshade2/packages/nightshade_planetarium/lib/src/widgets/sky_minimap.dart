@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import '../coordinate_system.dart';
 
 /// All-sky mini-map showing current FOV position
 /// Uses fisheye projection: horizon at edge, zenith at center
@@ -264,6 +263,7 @@ class _SkyMinimapPainter extends CustomPainter {
     return azimuth != oldDelegate.azimuth ||
            altitude != oldDelegate.altitude ||
            fieldOfView != oldDelegate.fieldOfView ||
-           rotation != oldDelegate.rotation;
+           rotation != oldDelegate.rotation ||
+           showLabels != oldDelegate.showLabels;
   }
 }
