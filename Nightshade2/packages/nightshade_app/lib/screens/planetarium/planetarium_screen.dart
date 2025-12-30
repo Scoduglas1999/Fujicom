@@ -1,4 +1,4 @@
-import 'dart:math' as math;
+import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -390,6 +390,112 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
     }
   }
 
+  /// Handle keyboard events for desktop navigation
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    final key = event.logicalKey;
+
+    // Arrow keys - pan view
+    if (key == LogicalKeyboardKey.arrowUp) {
+      _panView(0, -1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown) {
+      _panView(0, 1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowLeft) {
+      _panView(-1, 0);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _panView(1, 0);
+      return KeyEventResult.handled;
+    }
+
+    // +/- or =/- for zoom
+    if (key == LogicalKeyboardKey.equal || key == LogicalKeyboardKey.add || key == LogicalKeyboardKey.numpadAdd) {
+      _zoomIn();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.minus || key == LogicalKeyboardKey.numpadSubtract) {
+      _zoomOut();
+      return KeyEventResult.handled;
+    }
+
+    // R - reset view to default
+    if (key == LogicalKeyboardKey.keyR) {
+      _resetView();
+      return KeyEventResult.handled;
+    }
+
+    // G - toggle coordinate grid
+    if (key == LogicalKeyboardKey.keyG) {
+      ref.read(skyRenderConfigProvider.notifier).toggleGrid();
+      return KeyEventResult.handled;
+    }
+
+    // C - toggle constellation lines
+    if (key == LogicalKeyboardKey.keyC) {
+      ref.read(skyRenderConfigProvider.notifier).toggleConstellationLines();
+      return KeyEventResult.handled;
+    }
+
+    // M - toggle minimap
+    if (key == LogicalKeyboardKey.keyM) {
+      ref.read(showMinimapProvider.notifier).state = !ref.read(showMinimapProvider);
+      return KeyEventResult.handled;
+    }
+
+    // F - toggle FOV overlay
+    if (key == LogicalKeyboardKey.keyF) {
+      setState(() => _showFOV = !_showFOV);
+      return KeyEventResult.handled;
+    }
+
+    // Escape - dismiss popup and clear selection
+    if (key == LogicalKeyboardKey.escape) {
+      _dismissPopup();
+      ref.read(selectedObjectProvider.notifier).clearSelection();
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  /// Pan the view by a relative amount
+  void _panView(double dx, double dy) {
+    final viewState = ref.read(skyViewStateProvider);
+    final panAmount = viewState.fieldOfView / 20; // Pan 5% of FOV
+    ref.read(skyViewStateProvider.notifier).setCenter(
+      viewState.centerRA + dx * panAmount / 15, // Convert degrees to hours for RA
+      (viewState.centerDec + dy * panAmount).clamp(-90.0, 90.0),
+    );
+  }
+
+  /// Zoom in by 20%
+  void _zoomIn() {
+    final viewState = ref.read(skyViewStateProvider);
+    ref.read(skyViewStateProvider.notifier).setFieldOfView(
+      (viewState.fieldOfView * 0.8).clamp(1.0, 120.0),
+    );
+  }
+
+  /// Zoom out by 25%
+  void _zoomOut() {
+    final viewState = ref.read(skyViewStateProvider);
+    ref.read(skyViewStateProvider.notifier).setFieldOfView(
+      (viewState.fieldOfView * 1.25).clamp(1.0, 120.0),
+    );
+  }
+
+  /// Reset view to default center and FOV
+  void _resetView() {
+    ref.read(skyViewStateProvider.notifier).setCenter(0, 0);
+    ref.read(skyViewStateProvider.notifier).setFieldOfView(60);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<NightshadeColors>()!;
@@ -429,14 +535,9 @@ class _PlanetariumScreenState extends ConsumerState<PlanetariumScreen>
       }
     });
 
-    return KeyboardListener(
-      focusNode: FocusNode()..requestFocus(),
+    return Focus(
       autofocus: true,
-      onKeyEvent: (event) {
-        if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.escape) {
-          _dismissPopup();
-        }
-      },
+      onKeyEvent: _handleKeyEvent,
       child: GestureDetector(
         onTapDown: (details) {
           // Dismiss popup when clicking elsewhere
@@ -1426,6 +1527,8 @@ class _SearchHeaderState extends ConsumerState<_SearchHeader> {
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
   final FocusNode _focusNode = FocusNode();
+  Timer? _debounceTimer;
+  CelestialCoordinate? _parsedCoordinate;
 
   @override
   void initState() {
@@ -1444,15 +1547,51 @@ class _SearchHeaderState extends ConsumerState<_SearchHeader> {
   void dispose() {
     _hideOverlay();
     _focusNode.dispose();
+    _debounceTimer?.cancel();
     widget.controller.removeListener(_onTextChanged);
     super.dispose();
   }
 
+  /// Parse coordinate input like "RA 5h 35m, Dec -5d 23'"
+  CelestialCoordinate? _parseCoordinates(String input) {
+    // Try pattern like "RA 5h 35m, Dec -5d 23'" or "RA 5h 35m Dec -5 23"
+    final pattern = RegExp(r'RA\s*(\d+)h\s*(\d+)m.*Dec\s*([+-]?\d+)[°d]?\s*(\d+)', caseSensitive: false);
+    final match = pattern.firstMatch(input);
+
+    if (match != null) {
+      final raHours = double.parse(match.group(1)!);
+      final raMinutes = double.parse(match.group(2)!);
+      final decDegrees = double.parse(match.group(3)!);
+      final decMinutes = double.parse(match.group(4)!);
+
+      final ra = raHours + raMinutes / 60;
+      final dec = decDegrees + (decDegrees >= 0 ? decMinutes / 60 : -decMinutes / 60);
+
+      return CelestialCoordinate(ra: ra, dec: dec);
+    }
+    return null;
+  }
+
   void _onTextChanged() {
-    if (widget.controller.text.length >= 2) {
-      // Trigger search
-      ref.read(objectSearchProvider.notifier).search(widget.controller.text);
+    // Cancel previous debounce timer
+    _debounceTimer?.cancel();
+
+    // Check for coordinate input first
+    _parsedCoordinate = _parseCoordinates(widget.controller.text);
+    if (_parsedCoordinate != null) {
+      // If coordinates were parsed, show overlay immediately
       _showOverlay();
+      return;
+    }
+
+    if (widget.controller.text.length >= 2) {
+      // Debounce search by 250ms for instant results as user types
+      _debounceTimer = Timer(const Duration(milliseconds: 250), () {
+        if (mounted) {
+          ref.read(objectSearchProvider.notifier).search(widget.controller.text);
+          _showOverlay();
+        }
+      });
     } else {
       _hideOverlay();
     }
@@ -1460,9 +1599,9 @@ class _SearchHeaderState extends ConsumerState<_SearchHeader> {
 
   void _showOverlay() {
     if (_overlayEntry != null) return;
-    
-    // Don't show if query is too short
-    if (widget.controller.text.length < 2) return;
+
+    // Don't show if query is too short (unless we have parsed coordinates)
+    if (widget.controller.text.length < 2 && _parsedCoordinate == null) return;
 
     final overlay = Overlay.of(context);
     _overlayEntry = OverlayEntry(
@@ -1482,11 +1621,63 @@ class _SearchHeaderState extends ConsumerState<_SearchHeader> {
                 borderRadius: BorderRadius.circular(8),
                 color: widget.colors.surface,
               ),
-              constraints: const BoxConstraints(maxHeight: 300),
+              constraints: const BoxConstraints(maxHeight: 350),
               child: Consumer(
                 builder: (context, ref, child) {
+                  // Check for parsed coordinates first
+                  if (_parsedCoordinate != null) {
+                    final coord = _parsedCoordinate!;
+                    return Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _SearchCategoryHeader(
+                          title: 'Coordinates',
+                          icon: LucideIcons.compass,
+                          colors: widget.colors,
+                        ),
+                        MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () {
+                              // Navigate to parsed coordinates
+                              ref.read(skyViewStateProvider.notifier).setCenter(coord.ra, coord.dec);
+                              _hideOverlay();
+                              _focusNode.unfocus();
+                            },
+                            child: ListTile(
+                              dense: true,
+                              leading: Container(
+                                width: 32,
+                                height: 32,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: widget.colors.accent.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Icon(
+                                  LucideIcons.crosshair,
+                                  size: 16,
+                                  color: widget.colors.accent,
+                                ),
+                              ),
+                              title: Text(
+                                'Go to coordinates',
+                                style: TextStyle(color: widget.colors.textPrimary),
+                              ),
+                              subtitle: Text(
+                                'RA ${coord.ra.toStringAsFixed(2)}h, Dec ${coord.dec.toStringAsFixed(2)}°',
+                                style: TextStyle(color: widget.colors.textMuted, fontSize: 11),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
+
                   final searchState = ref.watch(objectSearchProvider);
-                  
+
                   if (searchState.isSearching) {
                     return const Center(
                       child: Padding(
@@ -1495,7 +1686,7 @@ class _SearchHeaderState extends ConsumerState<_SearchHeader> {
                       ),
                     );
                   }
-                  
+
                   if (searchState.results.isEmpty) {
                     return Padding(
                       padding: const EdgeInsets.all(16.0),
@@ -1505,83 +1696,48 @@ class _SearchHeaderState extends ConsumerState<_SearchHeader> {
                       ),
                     );
                   }
-                  
-                  return ListView.builder(
+
+                  // Group results by category: Stars and DSOs
+                  final stars = searchState.results.whereType<Star>().take(4).toList();
+                  final dsos = searchState.results.whereType<DeepSkyObject>().take(4).toList();
+
+                  // Calculate total items to show (max 8 results + category headers)
+                  final totalItems = (stars.isNotEmpty ? stars.length + 1 : 0) +
+                                    (dsos.isNotEmpty ? dsos.length + 1 : 0);
+
+                  if (totalItems == 0) {
+                    return Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(
+                        'No results found',
+                        style: TextStyle(color: widget.colors.textMuted),
+                      ),
+                    );
+                  }
+
+                  return ListView(
                     shrinkWrap: true,
                     padding: EdgeInsets.zero,
-                    itemCount: math.min(searchState.results.length, 10),
-                    itemBuilder: (context, index) {
-                      final object = searchState.results[index];
-                      
-                      // Handle display info - only DSOs have catalog tags
-                      String displayName;
-                      String catalogTag;
-                      String? typeName;
-                      
-                      if (object is DeepSkyObject) {
-                        final info = getDsoDisplayInfo(object);
-                        displayName = info.$1;
-                        catalogTag = info.$2;
-                        typeName = object.type.displayName;
-                      } else {
-                        // For stars, just use the name
-                        displayName = object.name;
-                        catalogTag = '★';
-                        typeName = 'Star';
-                      }
-                      
-                      return MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            // Select object
-                            ref.read(selectedObjectProvider.notifier).selectObject(object);
-
-                            // Move camera to center on the selected object
-                            ref.read(skyViewStateProvider.notifier).lookAt(object.coordinates);
-
-                            widget.onSearch(object.name);
-                            _hideOverlay();
-                            _focusNode.unfocus();
-                          },
-                          child: ListTile(
-                            dense: true,
-                            leading: Container(
-                              width: 32,
-                              height: 32,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: widget.colors.surfaceAlt,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: Text(
-                                catalogTag,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: widget.colors.primary,
-                                ),
-                              ),
-                            ),
-                            title: Text(
-                              displayName,
-                              style: TextStyle(color: widget.colors.textPrimary),
-                            ),
-                            subtitle: Text(
-                              typeName,
-                              style: TextStyle(color: widget.colors.textMuted, fontSize: 11),
-                            ),
-                            trailing: object.magnitude != null
-                                ? Text(
-                                    'mag ${object.magnitude!.toStringAsFixed(1)}',
-                                    style: TextStyle(color: widget.colors.textMuted, fontSize: 11),
-                                  )
-                                : null,
-                          ),
+                    children: [
+                      // DSO section
+                      if (dsos.isNotEmpty) ...[
+                        _SearchCategoryHeader(
+                          title: 'Deep Sky Objects',
+                          icon: LucideIcons.sparkles,
+                          colors: widget.colors,
                         ),
-                      );
-                    },
+                        ...dsos.map((dso) => _buildDsoResultTile(ref, dso)),
+                      ],
+                      // Stars section
+                      if (stars.isNotEmpty) ...[
+                        _SearchCategoryHeader(
+                          title: 'Stars',
+                          icon: LucideIcons.star,
+                          colors: widget.colors,
+                        ),
+                        ...stars.map((star) => _buildStarResultTile(ref, star)),
+                      ],
+                    ],
                   );
                 },
               ),
@@ -1592,6 +1748,109 @@ class _SearchHeaderState extends ConsumerState<_SearchHeader> {
     );
 
     overlay.insert(_overlayEntry!);
+  }
+
+  Widget _buildDsoResultTile(WidgetRef ref, DeepSkyObject dso) {
+    final info = getDsoDisplayInfo(dso);
+    final displayName = info.$1;
+    final catalogTag = info.$2;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          ref.read(selectedObjectProvider.notifier).selectObject(dso);
+          ref.read(skyViewStateProvider.notifier).lookAt(dso.coordinates);
+          widget.onSearch(dso.name);
+          _hideOverlay();
+          _focusNode.unfocus();
+        },
+        child: ListTile(
+          dense: true,
+          leading: Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: widget.colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              catalogTag,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: widget.colors.primary,
+              ),
+            ),
+          ),
+          title: Text(
+            displayName,
+            style: TextStyle(color: widget.colors.textPrimary),
+          ),
+          subtitle: Text(
+            dso.type.displayName,
+            style: TextStyle(color: widget.colors.textMuted, fontSize: 11),
+          ),
+          trailing: dso.magnitude != null
+              ? Text(
+                  'mag ${dso.magnitude!.toStringAsFixed(1)}',
+                  style: TextStyle(color: widget.colors.textMuted, fontSize: 11),
+                )
+              : null,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStarResultTile(WidgetRef ref, Star star) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          ref.read(selectedObjectProvider.notifier).selectObject(star);
+          ref.read(skyViewStateProvider.notifier).lookAt(star.coordinates);
+          widget.onSearch(star.name);
+          _hideOverlay();
+          _focusNode.unfocus();
+        },
+        child: ListTile(
+          dense: true,
+          leading: Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: widget.colors.surfaceAlt,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: const Text(
+              '★',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.amber,
+              ),
+            ),
+          ),
+          title: Text(
+            star.name,
+            style: TextStyle(color: widget.colors.textPrimary),
+          ),
+          subtitle: Text(
+            'Star',
+            style: TextStyle(color: widget.colors.textMuted, fontSize: 11),
+          ),
+          trailing: star.magnitude != null
+              ? Text(
+                  'mag ${star.magnitude!.toStringAsFixed(1)}',
+                  style: TextStyle(color: widget.colors.textMuted, fontSize: 11),
+                )
+              : null,
+        ),
+      ),
+    );
   }
 
   void _hideOverlay() {
@@ -1649,6 +1908,45 @@ class _SearchHeaderState extends ConsumerState<_SearchHeader> {
             _hideOverlay();
           },
         ),
+      ),
+    );
+  }
+}
+
+/// Category header for grouped search results
+class _SearchCategoryHeader extends StatelessWidget {
+  final String title;
+  final IconData icon;
+  final NightshadeColors colors;
+
+  const _SearchCategoryHeader({
+    required this.title,
+    required this.icon,
+    required this.colors,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: colors.surfaceAlt.withValues(alpha: 0.5),
+        border: Border(bottom: BorderSide(color: colors.border.withValues(alpha: 0.5))),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 12, color: colors.textMuted),
+          const SizedBox(width: 6),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: colors.textMuted,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
       ),
     );
   }
