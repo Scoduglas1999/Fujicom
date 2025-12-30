@@ -214,6 +214,9 @@ class SkyCanvasPainter extends CustomPainter {
   /// Current pan delta for parallax effect (pixels)
   final Offset? parallaxPanDelta;
 
+  /// Density hotspots for crowded regions (ra, dec, visibleCount, hiddenCount)
+  final List<(double, double, int, int)> densityHotspots;
+
   static const double _deg2rad = math.pi / 180;
   static const double _rad2deg = 180 / math.pi;
 
@@ -240,6 +243,7 @@ class SkyCanvasPainter extends CustomPainter {
     this.popinAnimationPhase,
     this.dsoPopinAnimationPhase,
     this.parallaxPanDelta,
+    this.densityHotspots = const [],
   });
   
   @override
@@ -302,6 +306,11 @@ class SkyCanvasPainter extends CustomPainter {
     // Draw DSOs
     if (config.showDSOs) {
       _drawDSOs(canvas, size, center, scale);
+    }
+
+    // Draw density indicators for crowded regions when zoomed out
+    if (densityHotspots.isNotEmpty) {
+      _drawDensityIndicators(canvas, size, center, scale);
     }
 
     // Draw Sun
@@ -1316,6 +1325,75 @@ class SkyCanvasPainter extends CustomPainter {
       }
 
       dsosDrawn++;
+    }
+  }
+
+  /// Draw visual density indicators for crowded regions when zoomed out.
+  /// Shows subtle glowing circles with count labels to indicate "zoom in to reveal more".
+  void _drawDensityIndicators(Canvas canvas, Size size, Offset center, double scale) {
+    for (final hotspot in densityHotspots) {
+      final (ra, dec, visibleCount, hiddenCount) = hotspot;
+      final coord = CelestialCoordinate(ra: ra, dec: dec);
+      final offset = _celestialToScreen(coord, center, scale);
+
+      if (offset == null || !_isInView(offset, size)) continue;
+
+      // Calculate indicator size based on hidden count
+      // More hidden objects = larger indicator
+      final indicatorRadius = 15.0 + (hiddenCount / 100).clamp(0.0, 15.0);
+
+      // Draw subtle blue glow
+      const indicatorColor = Color(0xFF64B5F6); // Light blue
+
+      // Outer glow
+      if (qualityConfig.useBlurEffects) {
+        final glowPaint = Paint()
+          ..color = indicatorColor.withValues(alpha: 0.15)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, indicatorRadius * 0.8);
+        canvas.drawCircle(offset, indicatorRadius * 1.5, glowPaint);
+      }
+
+      // Inner glow ring
+      final ringPaint = Paint()
+        ..color = indicatorColor.withValues(alpha: 0.25)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+      if (qualityConfig.useBlurEffects) {
+        ringPaint.maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+      }
+      canvas.drawCircle(offset, indicatorRadius, ringPaint);
+
+      // Draw count label for regions with many hidden objects
+      if (hiddenCount > 50) {
+        final textStyle = TextStyle(
+          color: indicatorColor.withValues(alpha: 0.8),
+          fontSize: 9,
+          fontWeight: FontWeight.w500,
+        );
+        final textPainter = TextPainter(
+          text: TextSpan(text: '+$hiddenCount', style: textStyle),
+          textDirection: ui.TextDirection.ltr,
+        );
+        textPainter.layout();
+
+        // Draw small background for readability
+        final bgRect = Rect.fromCenter(
+          center: offset + Offset(0, indicatorRadius + 10),
+          width: textPainter.width + 6,
+          height: textPainter.height + 2,
+        );
+        final bgPaint = Paint()
+          ..color = const Color(0xAA000000);
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(bgRect, const Radius.circular(3)),
+          bgPaint,
+        );
+
+        textPainter.paint(
+          canvas,
+          offset + Offset(-textPainter.width / 2, indicatorRadius + 10 - textPainter.height / 2),
+        );
+      }
     }
   }
 
@@ -2721,6 +2799,11 @@ class SkyCanvasPainter extends CustomPainter {
       return true;
     }
     if (parallaxPanDelta != oldDelegate.parallaxPanDelta) {
+      return true;
+    }
+
+    // Density hotspots change
+    if (densityHotspots.length != oldDelegate.densityHotspots.length) {
       return true;
     }
 

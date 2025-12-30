@@ -266,6 +266,7 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
     final planets = ref.watch(planetPositionsProvider);
     final milkyWayPoints = ref.watch(milkyWayPointsProvider);
     final qualityConfig = ref.watch(renderQualityProvider);
+    final densityHotspots = ref.watch(densityHotspotsProvider);
 
     // Handle selection animation
     if (qualityConfig.enableSelectionAnimation) {
@@ -390,6 +391,7 @@ class _InteractiveSkyViewState extends ConsumerState<InteractiveSkyView>
                   popinAnimationPhase: qualityConfig.enableStarPopin ? _popinPhase : null,
                   dsoPopinAnimationPhase: qualityConfig.enableDsoPopin ? _dsoPopinPhase : null,
                   parallaxPanDelta: qualityConfig.enableParallax ? _currentPanDelta : null,
+                  densityHotspots: densityHotspots,
                 ),
                 foregroundPainter: widget.showFOV
                     ? _FOVOverlayPainter(
