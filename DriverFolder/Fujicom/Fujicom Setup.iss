@@ -14,9 +14,9 @@
 ; Define the App Name here to avoid repetition and potential typos
 #define MyAppName "ASCOM Fujicom Camera Driver"
 ; Define the App Version here for consistency
-#define MyAppVersion "1.1"
+#define MyAppVersion "2.3"
 ; Define the full Version Info string (major.minor.build)
-#define MyAppVersionInfo "1.1.0" 
+#define MyAppVersionInfo "2.3.0" 
 
 ; --- Setup Section ---
 [Setup]
