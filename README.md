@@ -1,6 +1,8 @@
 # ASCOM Driver for Fujifilm X/GFX Cameras
 
 [![ASCOM Conform](https://img.shields.io/badge/ASCOM-Conform%20CameraV3-blue)](https://ascom-standards.org/)
+[![Support development](https://img.shields.io/badge/Support-Patreon-f96854)](https://www.patreon.com/cw/SeanDouglas)
+
 ## Overview
 
 This project provides an **ASCOM Camera driver** for controlling select Fujifilm X-Series and GFX-System cameras from popular astronomical imaging software like NINA, Sequence Generator Pro (SGP), KStars/Ekos, and others compatible with the ASCOM Platform.
@@ -8,6 +10,12 @@ This project provides an **ASCOM Camera driver** for controlling select Fujifilm
 The primary goal is to enable the use of these excellent Fujifilm cameras for astrophotography by providing essential controls such as exposure, ISO settings, and RAW image data retrieval directly within your preferred imaging suite.
 
 This driver utilizes the official **Fujifilm X SDK** for camera communication and **LibRaw** for decoding the RAW Bayer data, ensuring reliable operation and accurate data extraction.
+
+## Support Development
+
+Fujicom is free to use. If it helps make your Fujifilm camera useful in an astronomy workflow, you can optionally [support ongoing development on Patreon](https://www.patreon.com/cw/SeanDouglas).
+
+Support goes toward the practical maintenance work behind the driver: camera compatibility testing, SDK updates, installer upkeep, documentation, and fixes for the awkward hardware-specific issues that only show up on real imaging rigs. There are no paid-only driver features; support is appreciated, never required.
 
 ## Features
 
