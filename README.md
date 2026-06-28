@@ -1,7 +1,7 @@
 # ASCOM Driver for Fujifilm X/GFX Cameras
 
 [![ASCOM Conform](https://img.shields.io/badge/ASCOM-Conform%20CameraV3-blue)](https://ascom-standards.org/)
-[![Support development](https://img.shields.io/badge/Support-Patreon-f96854)](https://www.patreon.com/cw/SeanDouglas)
+[![Support on Patreon](https://img.shields.io/badge/Support%20on-Patreon-f96854?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/cw/SeanDouglas)
 
 ## Overview
 
@@ -12,6 +12,10 @@ The primary goal is to enable the use of these excellent Fujifilm cameras for as
 This driver utilizes the official **Fujifilm X SDK** for camera communication and **LibRaw** for decoding the RAW Bayer data, ensuring reliable operation and accurate data extraction.
 
 ## Support Development
+
+<p align="center">
+  <a href="https://www.patreon.com/cw/SeanDouglas"><img src="https://img.shields.io/badge/Support%20Fujicom%20on-Patreon-f96854?style=for-the-badge&logo=patreon&logoColor=white" alt="Support Fujicom on Patreon"></a>
+</p>
 
 Fujicom is free to use. If it helps make your Fujifilm camera useful in an astronomy workflow, you can optionally [support ongoing development on Patreon](https://www.patreon.com/cw/SeanDouglas).
 
