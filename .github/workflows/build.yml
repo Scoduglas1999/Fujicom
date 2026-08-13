@@ -21,3 +21,56 @@ jobs:
           dotnet msbuild Fuji/Fuji.csproj -t:Build -p:Configuration=Release -p:Platform=AnyCPU -p:BuildProjectReferences=false
       - name: Verify Fujifilm SDK interop
         run: python3 build/verify-sdk-interop.py
+
+  windows-release-build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: microsoft/setup-msbuild@v2
+      - name: Run core tests
+        run: dotnet run --project tests/Fujicom.Core.Tests/Fujicom.Core.Tests.csproj --configuration Release
+      - name: Restore Windows solution
+        run: msbuild Fuji.sln /t:Restore /p:Configuration=Release /p:Platform=x64
+      - name: Build x64 driver and native RAW wrapper
+        run: msbuild Fuji.sln /t:Build /p:Configuration=Release /p:Platform=x64 /p:OutDir="$pwd\artifacts\package\" /m
+      - name: Verify release payload
+        shell: pwsh
+        run: |
+          $required = @(
+            "ASCOM.ScdouglasFujifilm.exe",
+            "ASCOM.ScdouglasFujifilm.exe.config",
+            "LibRawWrapper.dll",
+            "LibRawWrapper.pdb",
+            "libraw.dll",
+            "XAPI.dll"
+          )
+          foreach ($name in $required) {
+            if (!(Test-Path "artifacts/package/$name")) {
+              throw "Missing required release file: $name"
+            }
+          }
+          $configs = @(Get-ChildItem artifacts/package -Filter *.json)
+          if ($configs.Count -ne 18) {
+            throw "Expected 18 camera configurations, found $($configs.Count)."
+          }
+      - name: Create installer and archives
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts/release, artifacts/symbols | Out-Null
+          Get-ChildItem artifacts/package -Filter *.pdb | Copy-Item -Destination artifacts/symbols
+          Compress-Archive -Path artifacts/package/* -DestinationPath artifacts/release/Fujicom-v3.0.0-runtime.zip
+          Compress-Archive -Path artifacts/symbols/* -DestinationPath artifacts/release/Fujicom-v3.0.0-symbols.zip
+          choco install innosetup --no-progress -y
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/Fujicom.iss
+          Get-ChildItem artifacts/release -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          } | Set-Content artifacts/release/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Fujicom-v3.0.0-release
+          path: artifacts/release/*
+          if-no-files-found: error

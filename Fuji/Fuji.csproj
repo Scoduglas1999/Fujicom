@@ -66,18 +66,10 @@
     <AssemblyOriginatorKeyFile>LocalServer.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="ASCOM.Platform" Condition="'$(OS)' != 'Windows_NT'">
+    <PackageReference Include="ASCOM.Platform">
       <Version>6.5.2</Version>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <Reference Include="ASCOM.Astrometry, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" Condition="'$(OS)' == 'Windows_NT'" />
-    <Reference Include="ASCOM.Attributes, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" Condition="'$(OS)' == 'Windows_NT'" />
-    <Reference Include="ASCOM.Controls, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" Condition="'$(OS)' == 'Windows_NT'" />
-    <Reference Include="ASCOM.DeviceInterfaces, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" Condition="'$(OS)' == 'Windows_NT'" />
-    <Reference Include="ASCOM.Exceptions, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" Condition="'$(OS)' == 'Windows_NT'" />
-    <Reference Include="ASCOM.SettingsProvider, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" Condition="'$(OS)' == 'Windows_NT'" />
-    <Reference Include="ASCOM.Utilities, Version=6.0.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" Condition="'$(OS)' == 'Windows_NT'" />
-    <Reference Include="ASCOM.Utilities.Video, Version=6.1.0.0, Culture=neutral, PublicKeyToken=565de7938946fba7, processorArchitecture=MSIL" Condition="'$(OS)' == 'Windows_NT'" />
     <Reference Include="System" />
     <Reference Include="System.ComponentModel.Composition" />
     <Reference Include="System.Drawing" />
@@ -90,28 +82,28 @@
     <Reference Include="System.Resources.Extensions" Condition="'$(OS)' != 'Windows_NT'">
       <HintPath>$(NuGetPackageRoot)system.resources.extensions/9.0.4/lib/net462/System.Resources.Extensions.dll</HintPath>
     </Reference>
-    <Reference Include="ASCOM.Astrometry" Condition="'$(OS)' != 'Windows_NT'">
+    <Reference Include="ASCOM.Astrometry">
       <HintPath>$(NuGetPackageRoot)ascom.platform/6.5.2/lib/net40/ASCOM.Astrometry.dll</HintPath>
     </Reference>
-    <Reference Include="ASCOM.Attributes" Condition="'$(OS)' != 'Windows_NT'">
+    <Reference Include="ASCOM.Attributes">
       <HintPath>$(NuGetPackageRoot)ascom.platform/6.5.2/lib/net40/ASCOM.Attributes.dll</HintPath>
     </Reference>
-    <Reference Include="ASCOM.Controls" Condition="'$(OS)' != 'Windows_NT'">
+    <Reference Include="ASCOM.Controls">
       <HintPath>$(NuGetPackageRoot)ascom.platform/6.5.2/lib/net40/ASCOM.Controls.dll</HintPath>
     </Reference>
-    <Reference Include="ASCOM.DeviceInterfaces" Condition="'$(OS)' != 'Windows_NT'">
+    <Reference Include="ASCOM.DeviceInterfaces">
       <HintPath>$(NuGetPackageRoot)ascom.platform/6.5.2/lib/net40/ASCOM.DeviceInterfaces.dll</HintPath>
     </Reference>
-    <Reference Include="ASCOM.Exceptions" Condition="'$(OS)' != 'Windows_NT'">
+    <Reference Include="ASCOM.Exceptions">
       <HintPath>$(NuGetPackageRoot)ascom.platform/6.5.2/lib/net40/ASCOM.Exceptions.dll</HintPath>
     </Reference>
-    <Reference Include="ASCOM.SettingsProvider" Condition="'$(OS)' != 'Windows_NT'">
+    <Reference Include="ASCOM.SettingsProvider">
       <HintPath>$(NuGetPackageRoot)ascom.platform/6.5.2/lib/net40/ASCOM.SettingsProvider.dll</HintPath>
     </Reference>
-    <Reference Include="ASCOM.Utilities" Condition="'$(OS)' != 'Windows_NT'">
+    <Reference Include="ASCOM.Utilities">
       <HintPath>$(NuGetPackageRoot)ascom.platform/6.5.2/lib/net40/ASCOM.Utilities.dll</HintPath>
     </Reference>
-    <Reference Include="ASCOM.Utilities.Video" Condition="'$(OS)' != 'Windows_NT'">
+    <Reference Include="ASCOM.Utilities.Video">
       <HintPath>$(NuGetPackageRoot)ascom.platform/6.5.2/lib/net40/ASCOM.Utilities.Video.dll</HintPath>
     </Reference>
     <Reference Include="System.Text.Json" Condition="'$(OS)' != 'Windows_NT'">
