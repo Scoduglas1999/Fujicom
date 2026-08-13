@@ -11,7 +11,7 @@
   "DefaultMaxExposure": 3600.0,
   "DefaultBulbCapable": true,
   "SdkConstants": {
-    "ModeManual": 4353,
+    "ModeManual": 1,
     "FocusModeManual": 1,
     "ImageQualityRaw": 1,
     "ImageQualityFine": 2,

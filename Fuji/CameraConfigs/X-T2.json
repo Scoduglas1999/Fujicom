@@ -8,7 +8,7 @@
   "DefaultMinSensitivity": 200,
   "DefaultMaxSensitivity": 12800,
   "DefaultMinExposure": 0.00003125,
-  "DefaultMaxExposure": 30.0,
+  "DefaultMaxExposure": 3600.0,
   "DefaultBulbCapable": true,
   "SdkConstants": {
     "FocusModeManual": 1,

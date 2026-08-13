@@ -37,6 +37,15 @@ extern "C" {
     int libraw_unpack(libraw_data_t* lr);
 
     [DllImport("libraw.dll", CallingConvention = CallingConvention::Cdecl)]
+    int libraw_dcraw_process(libraw_data_t* lr);
+
+    [DllImport("libraw.dll", CallingConvention = CallingConvention::Cdecl)]
+    libraw_processed_image_t* libraw_dcraw_make_mem_image(libraw_data_t* lr, int* errorCode);
+
+    [DllImport("libraw.dll", CallingConvention = CallingConvention::Cdecl)]
+    void libraw_dcraw_clear_mem(libraw_processed_image_t* image);
+
+    [DllImport("libraw.dll", CallingConvention = CallingConvention::Cdecl)]
     void libraw_close(libraw_data_t* lr);
 
     // Add other needed LibRaw C functions here using the same pattern
@@ -107,7 +116,63 @@ int RawProcessor::ProcessRawBuffer(
             return ret; // Return the specific LibRaw error
         }
 
-        // 4. Get dimensions (Direct struct access is fine)
+        // X-Trans cannot be represented through ASCOM's 2x2 Bayer sensor types. Match the NINA
+        // plugin's compatibility path: let LibRaw demosaic the 6x6 CFA, then sample the resulting
+        // RGB pixels into a synthetic RGGB mosaic. GFX Bayer bodies continue down the native path.
+        if (lr->idata.filters == 9)
+        {
+            lr->params.output_bps = 16;
+            lr->params.use_camera_wb = 1;
+            lr->params.no_auto_bright = 1;
+            lr->params.output_color = 1; // sRGB
+            lr->params.user_flip = 0;
+
+            ret = libraw_dcraw_process(lr);
+            if (ret != LIBRAW_SUCCESS) return ret;
+
+            libraw_processed_image_t* processed = libraw_dcraw_make_mem_image(lr, &ret);
+            if (!processed || ret != LIBRAW_SUCCESS)
+            {
+                if (processed) libraw_dcraw_clear_mem(processed);
+                return ret == LIBRAW_SUCCESS ? LIBRAW_DATA_ERROR : ret;
+            }
+
+            try
+            {
+                if (processed->type != LIBRAW_IMAGE_BITMAP || processed->colors < 3 || processed->bits != 16)
+                    return LIBRAW_DATA_ERROR;
+
+                // Fujifilm RAFs expose a 48-column optical-black/overscan strip through
+                // LibRaw. Use the same active-area correction as the NINA plugin.
+                int sourceWidth = processed->width;
+                width = sourceWidth > 48 ? sourceWidth - 48 : sourceWidth;
+                if ((width & 1) != 0) --width;
+                height = processed->height;
+                if (width <= 0 || height <= 0) return LIBRAW_DATA_ERROR;
+
+                bayerData = gcnew array<System::UInt16, 2>(height, width);
+                const unsigned short* rgb = reinterpret_cast<const unsigned short*>(processed->data);
+                int colors = processed->colors;
+                for (int y = 0; y < height; ++y)
+                {
+                    for (int x = 0; x < width; ++x)
+                    {
+                        int channel;
+                        if ((y & 1) == 0 && (x & 1) == 0) channel = 0;      // R
+                        else if ((y & 1) == 1 && (x & 1) == 1) channel = 2; // B
+                        else channel = 1;                                   // G
+                        bayerData[y, x] = rgb[((size_t)y * sourceWidth + x) * colors + channel];
+                    }
+                }
+            }
+            finally
+            {
+                libraw_dcraw_clear_mem(processed);
+            }
+            return LIBRAW_SUCCESS;
+        }
+
+        // 4. Get dimensions (native Bayer path)
         // Check if rawdata is valid before accessing sizes
         if (!lr->rawdata.sizes.raw_width || !lr->rawdata.sizes.raw_height) {
             ret = LIBRAW_DATA_ERROR;
@@ -115,8 +180,13 @@ int RawProcessor::ProcessRawBuffer(
             lr = nullptr;
             return ret;
         }
-        width = lr->sizes.raw_width;
-        height = lr->sizes.raw_height;
+        int sourceWidth = lr->sizes.raw_width;
+        int sourceHeight = lr->sizes.raw_height;
+        int left = lr->sizes.left_margin;
+        int top = lr->sizes.top_margin;
+        width = lr->sizes.width > 48 ? lr->sizes.width - 48 : lr->sizes.width;
+        if ((width & 1) != 0) --width;
+        height = lr->sizes.height;
 
 
         if (width <= 0 || height <= 0)
@@ -149,10 +219,16 @@ int RawProcessor::ProcessRawBuffer(
         }
         bayerData = gcnew array<System::UInt16, 2>(height, width);
 
-        // 7. Copy data from native buffer to managed array
+        if (left < 0 || top < 0 || left + width > sourceWidth || top + height > sourceHeight)
+        {
+            ret = LIBRAW_DATA_ERROR;
+            libraw_close(lr);
+            lr = nullptr;
+            return ret;
+        }
+
+        // 7. Copy the active sensor area from the native buffer to the managed array.
         pin_ptr<System::UInt16> pinnedBayerData = &bayerData[0, 0];
-        void* dest_ptr = static_cast<void*>(pinnedBayerData); // memcpy_s wants void*
-        const void* src_ptr = static_cast<const void*>(raw_image_ptr); // Cast source too
         size_t totalPixels = (size_t)width * height;
 
         // Check for potential overflow before calculating bytesToCopy
@@ -162,20 +238,21 @@ int RawProcessor::ProcessRawBuffer(
             lr = nullptr;
             return ret;
         }
-        size_t bytesToCopy = totalPixels * sizeof(ushort);
-
-        // Use memcpy_s for safer memory copy
-        errno_t memcpy_ret = memcpy_s(dest_ptr, bytesToCopy, src_ptr, bytesToCopy);
-
-        if (memcpy_ret != 0)
+        size_t rowBytes = (size_t)width * sizeof(ushort);
+        for (int y = 0; y < height; ++y)
         {
-            // Log the specific error if possible
-            System::Diagnostics::Debug::WriteLine(L"memcpy_s failed with error code: " + memcpy_ret);
-            ret = LIBRAW_UNSPECIFIED_ERROR; // Indicate a general failure
-            bayerData = nullptr; // Don't return potentially corrupt data
-            libraw_close(lr);
-            lr = nullptr;
-            return ret;
+            ushort* destination = pinnedBayerData + (size_t)y * width;
+            const ushort* source = raw_image_ptr + (size_t)(y + top) * sourceWidth + left;
+            errno_t memcpy_ret = memcpy_s(destination, rowBytes, source, rowBytes);
+            if (memcpy_ret != 0)
+            {
+                System::Diagnostics::Debug::WriteLine(L"memcpy_s failed with error code: " + memcpy_ret);
+                ret = LIBRAW_UNSPECIFIED_ERROR;
+                bayerData = nullptr;
+                libraw_close(lr);
+                lr = nullptr;
+                return ret;
+            }
         }
 
         // If we reach here, all LibRaw operations were successful

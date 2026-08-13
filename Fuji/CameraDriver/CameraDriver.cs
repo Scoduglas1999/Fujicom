@@ -112,6 +112,19 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         {
             if (!disposedValue)
             {
+                try
+                {
+                    if (connectedState)
+                    {
+                        CameraHardware.ReleaseConnection();
+                        connectedState = false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    try { LogMessage("Dispose", $"Exception releasing the camera connection: {ex.Message}"); } catch { }
+                }
+
                 if (disposing)
                 {
                     // Dispose managed state (managed objects).
@@ -297,28 +310,15 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 {
                     if (value) // Connect this instance
                     {
-                        // Check if the hardware layer is already connected (by another instance perhaps)
-                        if (!CameraHardware.Connected)
-                        {
-                            LogMessage("Connected Set", "Hardware layer not connected, attempting hardware connect...");
-                            CameraHardware.Connected = true; // This will perform the actual SDK connection
-                            LogMessage("Connected Set", "Hardware layer connect successful.");
-                        }
-                        else
-                        {
-                            LogMessage("Connected Set", "Hardware layer already connected by another instance.");
-                        }
+                        CameraHardware.AcquireConnection();
                         connectedState = true; // Mark this instance as connected
                         LogMessage("Connected Set", "Instance connected.");
                     }
                     else // Disconnect this instance
                     {
+                        CameraHardware.ReleaseConnection();
                         connectedState = false; // Mark this instance as disconnected
                         LogMessage("Connected Set", "Instance disconnected.");
-                        // IMPORTANT: Do NOT disconnect the hardware (CameraHardware.Connected = false) here!
-                        // Another client instance might still be connected. The hardware connection
-                        // is managed globally by the CameraHardware class and the local server.
-                        // It will be disconnected when the last client disconnects or the server shuts down.
                     }
                 }
                 catch (Exception ex)

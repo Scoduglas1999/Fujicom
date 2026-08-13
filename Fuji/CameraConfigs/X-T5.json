@@ -7,7 +7,7 @@
   "MaxAdu": 65535,
   "DefaultMinSensitivity": 125,
   "DefaultMaxSensitivity": 12800,
-  "DefaultMinExposure": 0.00000555555,
+  "DefaultMinExposure": 0.0000055555556,
   "DefaultMaxExposure": 3600.0,
   "DefaultBulbCapable": true,
   "SdkConstants": {
