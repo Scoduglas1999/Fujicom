@@ -163,6 +163,10 @@
     <Content Include="libraw.dll">
       <CopyToOutputDirectory>Never</CopyToOutputDirectory>
     </Content>
+    <Content Include="DLL and Headers\XSDK.DAT">
+      <Link>XSDK.DAT</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <Content Include="CameraConfigs\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
@@ -393,11 +397,13 @@
       <_SourceDlls Include="$(MSBuildProjectDirectory)\RequiredDLL\*.*" />
       <_SourceHeaders Include="$(MSBuildProjectDirectory)\RequiredHeaders\*.*" />
       <_SourceConfigs Include="$(MSBuildProjectDirectory)\CameraConfigs\*.*" />
+      <_SourceSdkData Include="$(MSBuildProjectDirectory)\DLL and Headers\XSDK.DAT" />
       <_SourceRootFiles Include="$(MSBuildProjectDirectory)\libraw.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(_SourceDlls)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_SourceHeaders)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_SourceConfigs)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_SourceSdkData)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_SourceRootFiles)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
     <Message Text="Custom Target: Copying files from RequiredDLL..." Importance="normal" />
     <Message Text="Custom Target: Copying files from RequiredHeaders..." Importance="normal" />
