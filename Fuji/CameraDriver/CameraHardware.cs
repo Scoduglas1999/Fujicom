@@ -1,5 +1,5 @@
 ﻿// ASCOM Camera hardware class for ScdouglasFujifilm
-// Author: S. Douglas <your@email.here>
+// Author: Sean Douglas
 // Description: Interfaces with the Fujifilm X SDK to control Fujifilm cameras.
 // Implements: ASCOM Camera interface version: 3
 
@@ -17,53 +17,13 @@ using System.Runtime.InteropServices; // Needed for GCHandle, Marshal
 using System.Threading;
 using System.Threading.Tasks; // Added for Task.Run
 using System.Windows.Forms;
-using System.Text.Json; // Required for JSON deserialization
+using ASCOM.ScdouglasFujifilm.Camera.Core;
 
 // Add using for the C++/CLI Wrapper namespace (adjust if you used a different namespace)
 using Fujifilm.LibRawWrapper; // Assuming this is your C++/CLI wrapper namespace
 
 namespace ASCOM.ScdouglasFujifilm.Camera
 {
-    #region Configuration Classes
-    // Configuration classes (SdkConstantConfig, ShutterSpeedMapping, CameraConfig)
-    // remain exactly as in the uploaded CameraHardware..cs file.
-    // Ensure SdkConstantConfig includes properties for all needed constants.
-    public class SdkConstantConfig
-    {
-        public int ModeManual { get; set; }
-        public int FocusModeManual { get; set; }
-        public int ImageQualityRaw { get; set; }
-        public int ImageQualityRawFine { get; set; } // Example, adjust names as needed
-        public int ImageQualityRawNormal { get; set; } // Example, adjust names as needed
-        public int ImageQualityRawSuperfine { get; set; } // Example, adjust names as needed
-        // Add other necessary constants based on your JSON structure
-        public int ImageQualityFine { get; set; }
-        public int ImageQualityNormal { get; set; }
-        public int ImageQualitySuperfine { get; set; }
-    }
-    public class ShutterSpeedMapping
-    {
-        public int SdkCode { get; set; }
-        public double Duration { get; set; }
-    }
-    public class CameraConfig
-    {
-        public string ModelName { get; set; }
-        public int CameraXSize { get; set; }
-        public int CameraYSize { get; set; }
-        public double PixelSizeX { get; set; }
-        public double PixelSizeY { get; set; }
-        public int MaxAdu { get; set; }
-        public int DefaultMinSensitivity { get; set; } // Keep for fallback
-        public int DefaultMaxSensitivity { get; set; } // Keep for fallback
-        public double DefaultMinExposure { get; set; } // Keep for fallback
-        public double DefaultMaxExposure { get; set; } // Keep for fallback
-        public bool DefaultBulbCapable { get; set; } // Keep for fallback
-        public SdkConstantConfig SdkConstants { get; set; }
-        public List<ShutterSpeedMapping> ShutterSpeedMap { get; set; }
-    }
-    #endregion
-
     /// <summary>
     /// Wraps the Fujifilm X SDK C-style DLL functions using P/Invoke.
     /// </summary>
@@ -184,6 +144,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         public const int XSDK_RELEASE_N_BULBS2OFF = 0x0008; // Correct value from XAPI.h
         // *** CORRECTED: Use the combined constant from XAPI.h for stopping bulb ***
         public const int XSDK_RELEASE_N_BULBS1OFF = (XSDK_RELEASE_N_BULBS2OFF | XSDK_RELEASE_N_S1OFF); // 0x000C
+        public const int XSDK_RELEASE_CANCEL = 0x000F;
 
 
         // Shutter Speed
@@ -200,9 +161,14 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         public const int XSDK_DRANGE_800 = 800;
 
         // RAW Compression (From XAPIOpt.h)
-        public const int SDK_RAW_COMPRESSION_OFF = 0;
-        public const int SDK_RAW_COMPRESSION_LOSSLESS = 1;
-        public const int SDK_RAW_COMPRESSION_LOSSY = 2; // Added for completeness
+        public const int SDK_RAW_COMPRESSION_OFF = 0x0001;
+        public const int SDK_RAW_COMPRESSION_LOSSLESS = 0x0002;
+        public const int SDK_RAW_COMPRESSION_LOSSY = 0x0003;
+        private const int API_CODE_SetImageQuality = 0x2129;
+        private const int API_CODE_GetImageQuality = 0x2130;
+        private const int API_CODE_SetRAWCompression = 0x2150;
+        private const int API_CODE_GetRAWCompression = 0x2151;
+        private const int API_PARAM_SINGLE_VALUE = 1;
 
         #endregion
 
@@ -247,7 +213,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         // *** END ADDED ***
 
         [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_CapSensitivity")]
-        public static extern int XSDK_CapSensitivity(IntPtr hCamera, int lDR, out int plNumSensitivity, IntPtr plSensitivity);
+        public static extern int XSDK_CapSensitivity(IntPtr hCamera, ref int plNumSensitivity, IntPtr plSensitivity);
 
         [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_SetSensitivity")]
         public static extern int XSDK_SetSensitivity(IntPtr hCamera, int lSensitivity);
@@ -281,24 +247,23 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetBufferCapacity")]
         public static extern int XSDK_GetBufferCapacity(IntPtr hCamera, out int plShootFrameNum, out int plTotalFrameNum);
 
-        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_SetDRange")]
-        public static extern int XSDK_SetDRange(IntPtr hCamera, int lDRange);
-        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetDRange")]
-        public static extern int XSDK_GetDRange(IntPtr hCamera, out int plDRange);
+        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_SetProp")]
+        private static extern int XSDK_SetProp(IntPtr hCamera, int apiCode, int apiParameter, int value);
 
-        // *** ADDED Image Quality and RAW Compression Signatures ***
-        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_SetImageQuality")]
-        public static extern int XSDK_SetImageQuality(IntPtr hCamera, int lImageQuality);
+        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetProp")]
+        private static extern int XSDK_GetProp(IntPtr hCamera, int apiCode, int apiParameter, out int value);
 
-        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetImageQuality")]
-        public static extern int XSDK_GetImageQuality(IntPtr hCamera, out int plImageQuality);
+        public static int XSDK_SetImageQuality(IntPtr hCamera, int value) =>
+            XSDK_SetProp(hCamera, API_CODE_SetImageQuality, API_PARAM_SINGLE_VALUE, value);
 
-        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_SetRAWCompression")]
-        public static extern int XSDK_SetRAWCompression(IntPtr hCamera, int lRAWCompression);
+        public static int XSDK_GetImageQuality(IntPtr hCamera, out int value) =>
+            XSDK_GetProp(hCamera, API_CODE_GetImageQuality, API_PARAM_SINGLE_VALUE, out value);
 
-        [DllImport(SdkDllName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "XSDK_GetRAWCompression")]
-        public static extern int XSDK_GetRAWCompression(IntPtr hCamera, out int plRAWCompression);
-        // *** END ADDED ***
+        public static int XSDK_SetRAWCompression(IntPtr hCamera, int value) =>
+            XSDK_SetProp(hCamera, API_CODE_SetRAWCompression, API_PARAM_SINGLE_VALUE, value);
+
+        public static int XSDK_GetRAWCompression(IntPtr hCamera, out int value) =>
+            XSDK_GetProp(hCamera, API_CODE_GetRAWCompression, API_PARAM_SINGLE_VALUE, out value);
 
         #endregion
 
@@ -355,7 +320,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         }
 
         // *** MODIFIED: Use carefully managed temporary pointer for first call ***
-        internal static int[] GetIntArrayFromSdkSensitivity(IntPtr hCamera, int lDR) // lDR is int
+        internal static int[] GetIntArrayFromSdkSensitivity(IntPtr hCamera)
         {
             int count = 0; // Use int for count
             IntPtr dataPtr = IntPtr.Zero; // Pointer for the second call
@@ -364,14 +329,14 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             try
             {
                 // --- First call: Get Count (using IntPtr.Zero) ---
-                LogMessageStatic("GetIntArrayFromSdkSensitivity", $"Calling XSDK_CapSensitivity(lDR={lDR}, GetCount - using IntPtr.Zero)...");
-                result = XSDK_CapSensitivity(hCamera, lDR, out count, IntPtr.Zero); // Pass IntPtr.Zero for first call
+                LogMessageStatic("GetIntArrayFromSdkSensitivity", "Calling XSDK_CapSensitivity(GetCount)...");
+                result = XSDK_CapSensitivity(hCamera, ref count, IntPtr.Zero);
                 LogMessageStatic("GetIntArrayFromSdkSensitivity", $"XSDK_CapSensitivity (GetCount) returned count={count}, result={result}");
 
                 // Check result of the first call
                 if (result != XSDK_COMPLETE)
                 {
-                    CheckSdkError(hCamera, result, $"XSDK_CapSensitivity (lDR={lDR}, GetCount)"); // Log the error
+                    CheckSdkError(hCamera, result, "XSDK_CapSensitivity (GetCount)");
                     return new int[0]; // Return empty on error
                 }
                 if (count <= 0)
@@ -383,16 +348,15 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 // --- Second call: Get Data ---
                 // Allocate the correctly sized buffer for the actual data (array of ints, matching 32-bit long)
                 dataPtr = Marshal.AllocHGlobal(sizeof(int) * count);
-                LogMessageStatic("GetIntArrayFromSdkSensitivity", $"Calling XSDK_CapSensitivity(lDR={lDR}, GetData into ptr {dataPtr})...");
-                // Call again to get the actual data into dataPtr. Need to pass count again via 'out'.
-                int countCheck = 0; // Use a temporary variable for the out param on the second call
-                result = XSDK_CapSensitivity(hCamera, lDR, out countCheck, dataPtr);
+                LogMessageStatic("GetIntArrayFromSdkSensitivity", $"Calling XSDK_CapSensitivity(GetData into ptr {dataPtr})...");
+                int countCheck = count;
+                result = XSDK_CapSensitivity(hCamera, ref countCheck, dataPtr);
                 LogMessageStatic("GetIntArrayFromSdkSensitivity", $"XSDK_CapSensitivity (GetData) returned result={result}, countCheck={countCheck}");
 
                 // Check result of the second call
                 if (result != XSDK_COMPLETE)
                 {
-                    CheckSdkError(hCamera, result, $"XSDK_CapSensitivity (lDR={lDR}, GetData)"); // Log the error
+                    CheckSdkError(hCamera, result, "XSDK_CapSensitivity (GetData)");
                     return new int[0]; // Return empty on error
                 }
 
@@ -463,7 +427,6 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 else if (errCode == XSDK_ERRCODE_NODRIVER) errCodeName = "NODRIVER";
                 else if (errCode == XSDK_ERRCODE_NO_MODEL_MODULE) errCodeName = "NO_MODEL_MODULE";
                 else if (errCode == XSDK_ERRCODE_API_NOTFOUND) errCodeName = "API_NOTFOUND";
-                else if (errCode == XSDK_ERRCODE_API_MISMATCH) errCodeName = "API_MISMATCH";
                 else if (errCode == XSDK_ERRCODE_INVALID_USBMODE) errCodeName = "INVALID_USBMODE";
                 else if (errCode == XSDK_ERRCODE_FORCEMODE_BUSY) errCodeName = "FORCEMODE_BUSY";
                 else if (errCode == XSDK_ERRCODE_RUNNING_OTHER_FUNCTION) errCodeName = "RUNNING_OTHER_FUNCTION";
@@ -521,6 +484,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         private static bool sdkInitialized = false;
         private static IntPtr hCamera = IntPtr.Zero;
         private static object hardwareLock = new object();
+        private static int connectedClientCount;
         private static bool runOnce = false;
         internal static CameraConfig currentConfig = null; // Keep this null initially
         internal static Util utilities;
@@ -550,9 +514,12 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         private static Dictionary<double, int> durationToSdkShutterSpeed = new Dictionary<double, int>();
         private static List<int> supportedShutterSpeeds = new List<int>(); // *** Will be populated by SDK ***
         private static double minExposure = 0.0001; // *** Default, updated by SDK ***
-        private static double maxExposure = 60.0; // *** MODIFIED: Default max programmed exposure, T-mode handles longer ***
+        private static double maxTimedExposure = 60.0;
+        private static double maxExposure = 3600.0;
         private static bool bulbCapable = true; // *** Default, updated by SDK ***
         private static object lastImageArray = null;
+        private static bool activeExposureIsBulb;
+        private static int exposureGeneration;
         #endregion
 
         #region Initialisation and Dispose
@@ -752,62 +719,27 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                             LogMessage("Connected Set", $"Configuration loaded for {currentConfig.ModelName}.");
                             // --- End Load Configuration ---
 
-                            // --- Set Exposure Mode to Manual using loaded config ---
-                            // *** ADDED CHECK: Only set mode if the camera model requires it ***
-                            // List of models known to have software-settable PASM modes (e.g., via a mode dial)
-                            List<string> modelsRequiringSetMode = new List<string> { "X-S10", "X-S20" };
-
-                            if (modelsRequiringSetMode.Contains(detectedModelName, StringComparer.OrdinalIgnoreCase))
+                            // Read the current mode for diagnostics, but do not force it here. Some
+                            // bodies report a COMBINATION error when mode is changed remotely even
+                            // though the physical dial is already set correctly.
+                            LogMessage("Connected Set", "Step 5.6: Reading the current exposure mode (the camera must be set to Manual physically)...");
+                            try
                             {
-                                LogMessage("Connected Set", $"Step 5.6: Setting Exposure Mode to Manual (M) for model {detectedModelName} using loaded config...");
-                                int manualModeCode = currentConfig.SdkConstants.ModeManual;
-                                int modeResult = FujifilmSdkWrapper.XSDK_SetMode(hCamera, manualModeCode);
-                                FujifilmSdkWrapper.CheckSdkError(hCamera, modeResult, $"XSDK_SetMode(Manual - Code: {manualModeCode})");
-                                LogMessage("Connected Set", "Exposure Mode set to Manual (M).");
-
-                                // --- Verify Mode ---
                                 int currentMode;
                                 int getModeResult = FujifilmSdkWrapper.XSDK_GetMode(hCamera, out currentMode);
                                 if (getModeResult == FujifilmSdkWrapper.XSDK_COMPLETE)
                                 {
-                                    LogMessage("Connected Set", $"Verified camera exposure mode is now: {currentMode} (Expected {manualModeCode})");
-                                    if (currentMode != manualModeCode)
-                                    {
-                                        LogMessage("Connected Set", $"CRITICAL WARNING: SetMode succeeded but GetMode returned unexpected mode {currentMode}!");
-                                        // Optional: throw an exception here if Mode M is absolutely essential
-                                        // throw new DriverException($"Failed to confirm Manual (M) mode after setting. Current mode: {currentMode}");
-                                    }
+                                    LogMessage("Connected Set", $"Current camera exposure mode: {currentMode} (0x{currentMode:X}).");
                                 }
                                 else
                                 {
-                                    LogMessage("Connected Set", $"Warning: XSDK_GetMode failed with result {getModeResult} after setting exposure mode.");
+                                    LogMessage("Connected Set", $"Warning: XSDK_GetMode failed with result {getModeResult}.");
                                 }
-                                // --- End Verify Mode ---
                             }
-                            else
+                            catch (Exception modeEx)
                             {
-                                LogMessage("Connected Set", $"Step 5.6: Skipping XSDK_SetMode for model {detectedModelName} (mode likely set by physical dials).");
-                                // Optionally, get the current AE Mode determined by dials for logging/verification
-                                try
-                                {
-                                    int currentAEMode;
-                                    int getAEModeResult = FujifilmSdkWrapper.XSDK_GetAEMode(hCamera, out currentAEMode);
-                                    if (getAEModeResult == FujifilmSdkWrapper.XSDK_COMPLETE)
-                                    {
-                                        LogMessage("Connected Set", $"Current AE Mode detected via GetAEMode: {currentAEMode}");
-                                    }
-                                    else
-                                    {
-                                        LogMessage("Connected Set", $"Warning: Could not get current AE Mode via GetAEMode (Result: {getAEModeResult})");
-                                        // Don't throw here, just log the warning
-                                    }
-                                }
-                                catch (Exception aeEx)
-                                {
-                                    LogMessage("Connected Set", $"Warning: Exception during diagnostic GetAEMode: {aeEx.Message}");
-                                }
+                                LogMessage("Connected Set", $"Warning: Exception while reading exposure mode: {modeEx.Message}");
                             }
-                            // --- End Set/Check Exposure Mode ---
 
                             // *** ADDED: Attempt to set RAW Only + Uncompressed ***
                             LogMessage("Connected Set", "Step 5.7: Attempting to set Image Quality and RAW Compression...");
@@ -820,8 +752,8 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                                 FujifilmSdkWrapper.CheckSdkError(hCamera, iqResult, $"XSDK_SetImageQuality(RAW Only - Code: {rawOnlyQualityCode})");
                                 LogMessage("Connected Set", "Image Quality set to RAW Only.");
 
-                                // Set RAW Compression to Uncompressed (using standard SDK value 0)
-                                int uncompressedCode = FujifilmSdkWrapper.SDK_RAW_COMPRESSION_OFF; // Should be 0
+                                // Set RAW Compression to Uncompressed (SDK value 1).
+                                int uncompressedCode = FujifilmSdkWrapper.SDK_RAW_COMPRESSION_OFF;
                                 LogMessage("Connected Set", $"Setting RAW Compression to Uncompressed (Code: {uncompressedCode})...");
                                 int rcResult = FujifilmSdkWrapper.XSDK_SetRAWCompression(hCamera, uncompressedCode);
                                 FujifilmSdkWrapper.CheckSdkError(hCamera, rcResult, $"XSDK_SetRAWCompression(Uncompressed - Code: {uncompressedCode})");
@@ -875,6 +807,19 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     else // Disconnect
                     {
                         LogMessage("Connected Set", "Disconnecting hardware...");
+                        lock (exposureLock)
+                        {
+                            exposureGeneration++;
+                            exposureTimer?.Dispose();
+                            exposureTimer = null;
+                            if (cameraState == CameraStates.cameraExposing || cameraState == CameraStates.cameraWaiting)
+                            {
+                                try { CancelActiveExposure(); } catch (Exception ex) { LogMessage("Connected Set", "Exposure cancellation failed: " + ex.Message); }
+                            }
+                            cameraState = CameraStates.cameraIdle;
+                            imageReady = false;
+                            lastImageArray = null;
+                        }
                         if (hCamera != IntPtr.Zero)
                         {
                             try
@@ -900,6 +845,27 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             }
         }
 
+        internal static void AcquireConnection()
+        {
+            lock (hardwareLock)
+            {
+                if (connectedClientCount == 0) Connected = true;
+                connectedClientCount++;
+                LogMessage("AcquireConnection", $"Connected ASCOM clients: {connectedClientCount}");
+            }
+        }
+
+        internal static void ReleaseConnection()
+        {
+            lock (hardwareLock)
+            {
+                if (connectedClientCount == 0) return;
+                connectedClientCount--;
+                LogMessage("ReleaseConnection", $"Connected ASCOM clients: {connectedClientCount}");
+                if (connectedClientCount == 0) Connected = false;
+            }
+        }
+
 
         public static string Description => DriverDescription;
         public static string DriverInfo => $"Fujifilm ASCOM Driver. Version: {DriverVersion}";
@@ -917,13 +883,15 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             lock (exposureLock)
             {
                 LogMessage("AbortExposure", $"Request received. Current state: {cameraState}");
-                if (cameraState == CameraStates.cameraExposing)
+                if (cameraState == CameraStates.cameraExposing || cameraState == CameraStates.cameraWaiting)
                 {
-                    LogMessage("AbortExposure", "Abort not currently supported by SDK/driver.");
                     exposureTimer?.Dispose(); exposureTimer = null;
-                    cameraState = CameraStates.cameraIdle;
+                    CancelActiveExposure();
+                    int abortedGeneration = ++exposureGeneration;
+                    cameraState = CameraStates.cameraWaiting;
                     imageReady = false;
-                    throw new MethodNotImplementedException("AbortExposure is not implemented.");
+                    lastImageArray = null;
+                    Task.Run(() => DrainAbortedExposure(abortedGeneration));
                 }
                 else { LogMessage("AbortExposure", "No exposure in progress to abort."); }
             }
@@ -953,7 +921,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         public static double ElectronsPerADU => throw new PropertyNotImplementedException("ElectronsPerADU", false);
         public static double ExposureMax => maxExposure;
         public static double ExposureMin => minExposure;
-        public static double ExposureResolution => -1;
+        public static double ExposureResolution => minExposure;
         public static bool FastReadout { get => false; set => throw new PropertyNotImplementedException("FastReadout", true); }
         public static double FullWellCapacity => throw new PropertyNotImplementedException("FullWellCapacity", false);
 
@@ -1050,14 +1018,25 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 lock (exposureLock)
                 {
                     if (!imageReady) { LogMessage("ImageArray Get", "Error: Image not ready."); throw new InvalidOperationException("Image not ready. Check ImageReady first."); }
-                    if (lastImageArray == null) { LogMessage("ImageArray Get", "Error: ImageReady was true but image data is null. Attempting download again..."); DownloadImageData(); }
-                    if (lastImageArray == null) { LogMessage("ImageArray Get", "Error: DownloadImageData failed to produce image data."); cameraState = CameraStates.cameraError; throw new DriverException("Failed to retrieve image data after download attempt."); }
+                    imageReady = false;
+                    cameraState = CameraStates.cameraDownload;
+                }
 
-                    LogMessage("ImageArray Get", "Returning image array.");
+                // RAW decoding can take seconds for a 100 MP frame. Do it without holding the
+                // exposure-state lock so CameraState and logging remain responsive.
+                DownloadImageData();
+
+                lock (exposureLock)
+                {
+                    if (lastImageArray == null)
+                    {
+                        cameraState = CameraStates.cameraError;
+                        throw new DriverException("Failed to retrieve image data after download attempt.");
+                    }
                     object imageToReturn = lastImageArray;
                     lastImageArray = null;
-                    imageReady = false;
-                    if (cameraState != CameraStates.cameraError) cameraState = CameraStates.cameraIdle;
+                    cameraState = CameraStates.cameraIdle;
+                    LogMessage("ImageArray Get", "Returning image array.");
                     return imageToReturn;
                 }
             }
@@ -1083,9 +1062,11 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             {
                 lock (exposureLock)
                 {
-                    if (cameraState == CameraStates.cameraExposing) return 50;
-                    if (cameraState == CameraStates.cameraDownload) return 90;
-                    if (cameraState == CameraStates.cameraIdle && imageReady) return 100;
+                    if (cameraState == CameraStates.cameraExposing)
+                        return FujifilmCapabilities.PercentComplete(exposureStartTime, lastExposureDuration, false, false);
+                    if (cameraState == CameraStates.cameraWaiting) return 98;
+                    if (cameraState == CameraStates.cameraDownload) return 99;
+                    if (imageReady) return 100;
                     return 0;
                 }
             }
@@ -1129,14 +1110,11 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 if (duration < minExposure) { LogMessage("StartExposure", $"Requested duration {duration}s is less than minimum {minExposure}s."); throw new InvalidValueException("StartExposure Duration", duration.ToString(), $"Minimum exposure is {minExposure}"); }
 
                 // Determine if Bulb/Time mode is needed based on max *programmable* exposure
-                bool isLongExposure = duration > maxExposure;
+                if (duration > maxExposure)
+                    throw new InvalidValueException("StartExposure Duration", duration.ToString(), $"Maximum exposure is {maxExposure} seconds");
                 bool useSdkBulbSequence = false; // Flag for PASM bulb sequence OR Physical Dial Bulb sequence
 
-                // Check if the current camera model has a physical T-dial (or B dial)
-                bool hasPhysicalDial = IsPhysicalDialModel(currentConfig?.ModelName); // Renamed for clarity
-
                 IntPtr shotOptPtr = IntPtr.Zero;
-                long shotOptValue = 0;
                 bool shotOptAllocated = false;
 
                 try
@@ -1161,72 +1139,40 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     }
                     catch (Exception stateEx) { LogMessage("StartExposure", $"Warning: Could not get full camera state before exposure: {stateEx.Message}"); }
 
-                    int sdkShutterSpeed;
-                    int isBulbFlag;
-                    bool skipSetShutterSpeed = false; // Flag to explicitly control skipping
+                    int sdkShutterSpeed = FujifilmCapabilities.SelectShutterCode(
+                        sdkShutterSpeedToDuration, duration, bulbCapable);
+                    int isBulbFlag = sdkShutterSpeed == FujifilmSdkWrapper.XSDK_SHUTTER_BULB ? 1 : 0;
+                    useSdkBulbSequence = isBulbFlag == 1;
+                    double actualDuration = useSdkBulbSequence
+                        ? duration
+                        : sdkShutterSpeedToDuration[sdkShutterSpeed];
 
-                    if (hasPhysicalDial)
-                    {
-                        // --- Physical Dial Camera (X-T, X-Pro) ---
-                        // Always use SDK Bulb sequence, assume user set dial to 'B'
-                        LogMessage("StartExposure", "Physical dial camera detected. Using SDK Bulb sequence. Ensure physical dial is set to 'B'.");
-                        useSdkBulbSequence = true;
-                        sdkShutterSpeed = FujifilmSdkWrapper.XSDK_SHUTTER_BULB; // Target state is Bulb
-                        isBulbFlag = 1;
-                        skipSetShutterSpeed = true; // Do NOT attempt to set Bulb mode via SDK
-                    }
-                    else // PASM Camera (GFX, X-S)
-                    {
-                        if (isLongExposure)
-                        {
-                            // --- PASM Long Exposure (Bulb) ---
-                            if (!bulbCapable) // Check if Bulb is supported at all
-                            {
-                                LogMessage("StartExposure", $"Error: Long exposure ({duration}s) requested but camera does not support Bulb mode (bulbCapable={bulbCapable}).");
-                                throw new InvalidValueException("StartExposure Duration", duration.ToString(), $"Camera does not support Bulb mode or required duration exceeds limits.");
-                            }
-                            LogMessage("StartExposure", "Long exposure on PASM camera. Using SDK Bulb sequence.");
-                            sdkShutterSpeed = FujifilmSdkWrapper.XSDK_SHUTTER_BULB; // Use -1
-                            isBulbFlag = 1;
-                            useSdkBulbSequence = true;
-                            skipSetShutterSpeed = false; // MUST set Bulb mode via SDK
-                        }
-                        else
-                        {
-                            // --- PASM Standard Timed Exposure ---
-                            LogMessage("StartExposure", "Standard timed exposure on PASM camera.");
-                            sdkShutterSpeed = DurationToSdkShutterSpeed(duration); // Gets the specific code
-                            isBulbFlag = 0;
-                            useSdkBulbSequence = false; // Use timed sequence
-                            skipSetShutterSpeed = false; // MUST set timed speed via SDK
-                        }
-                    }
+                    if (useSdkBulbSequence && !bulbCapable)
+                        throw new InvalidValueException("StartExposure Duration", duration.ToString(), "Bulb mode is unavailable.");
 
-                    // --- Set Shutter Speed (Conditional) ---
-                    if (!skipSetShutterSpeed)
+                    LogMessage("StartExposure", $"Setting shutter code {sdkShutterSpeed} for {actualDuration:0.########}s (requested {duration:0.########}s, Bulb={isBulbFlag}).");
+                    int setResult = FujifilmSdkWrapper.XSDK_ERROR;
+                    for (int attempt = 1; attempt <= 3; attempt++)
                     {
-                        LogMessage("StartExposure", $"Setting SDK Shutter Speed Code: {sdkShutterSpeed}, Bulb Flag: {isBulbFlag}");
-                        int setResult = FujifilmSdkWrapper.XSDK_SetShutterSpeed(hCamera, sdkShutterSpeed, isBulbFlag);
+                        setResult = FujifilmSdkWrapper.XSDK_SetShutterSpeed(hCamera, sdkShutterSpeed, isBulbFlag);
+                        if (setResult == FujifilmSdkWrapper.XSDK_COMPLETE) break;
+                        LogMessage("StartExposure", $"SetShutterSpeed attempt {attempt}/3 returned {setResult}.");
+                        if (attempt < 3) Thread.Sleep(250);
+                    }
+                    if (setResult != FujifilmSdkWrapper.XSDK_COMPLETE)
+                    {
+                        LogMessage("StartExposure", "The camera rejected software shutter control. Set a physical shutter dial to T and use Manual exposure mode.");
                         FujifilmSdkWrapper.CheckSdkError(hCamera, setResult, $"XSDK_SetShutterSpeed (Bulb={isBulbFlag})");
+                    }
 
-                        // Add delay ONLY if setting Bulb mode on PASM camera
-                        if (useSdkBulbSequence && !hasPhysicalDial)
-                        {
-                            LogMessage("StartExposure", "Adding short delay after setting Bulb mode on PASM camera...");
-                            System.Threading.Thread.Sleep(100); // 100ms delay
-                        }
-                    }
-                    else
-                    {
-                        LogMessage("StartExposure", "Skipping XSDK_SetShutterSpeed for physical dial camera Bulb sequence.");
-                    }
+                    if (useSdkBulbSequence) Thread.Sleep(100);
 
 
                     // --- Allocate shotOptPtr ---
-                    shotOptPtr = Marshal.AllocHGlobal(sizeof(long));
-                    Marshal.WriteInt64(shotOptPtr, shotOptValue); // Write 0L to the allocated memory
+                    shotOptPtr = Marshal.AllocHGlobal(sizeof(int));
+                    Marshal.WriteInt32(shotOptPtr, 0);
                     shotOptAllocated = true; // Mark as allocated
-                    LogMessage("StartExposure", $"Allocated plShotOpt (long*) at {shotOptPtr} with value {shotOptValue}");
+                    LogMessage("StartExposure", $"Allocated plShotOpt at {shotOptPtr} with value 0");
 
                     // --- Trigger Exposure Start ---
                     int releaseModeStart;
@@ -1277,26 +1223,26 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
                     // --- Update State and Start Timer ---
                     cameraState = CameraStates.cameraExposing;
+                    activeExposureIsBulb = useSdkBulbSequence;
+                    int generation = ++exposureGeneration;
                     exposureStartTime = DateTime.UtcNow;
-                    lastExposureDuration = duration;
+                    lastExposureDuration = actualDuration;
                     imageReady = false;
                     lastImageArray = null;
 
-                    int exposureMillis = (int)(duration * 1000);
-                    int bufferMillis = 2000; // Add buffer time for camera processing
-
+                    int exposureMillis = Math.Max(0, (int)Math.Round(actualDuration * 1000));
                     exposureTimer?.Dispose();
 
                     // Use different timer callbacks based on sequence used
                     if (useSdkBulbSequence) // Timer needed for SDK-controlled bulb (PASM or Physical Dial)
                     {
                         LogMessage("StartExposure", $"Starting BULB timer for {exposureMillis} ms (Callback: OnBulbExposureTimerElapsed).");
-                        exposureTimer = new System.Threading.Timer(OnBulbExposureTimerElapsed, null, exposureMillis, Timeout.Infinite);
+                        exposureTimer = new System.Threading.Timer(OnBulbExposureTimerElapsed, generation, exposureMillis, Timeout.Infinite);
                     }
                     else // Standard Timed Exposure (Only PASM)
                     {
-                        LogMessage("StartExposure", $"Starting TIMED timer for {exposureMillis + bufferMillis} ms (Callback: OnExposureComplete).");
-                        exposureTimer = new System.Threading.Timer(OnExposureComplete, null, exposureMillis + bufferMillis, Timeout.Infinite);
+                        LogMessage("StartExposure", $"Starting TIMED timer for {exposureMillis} ms (Callback: OnExposureComplete).");
+                        exposureTimer = new System.Threading.Timer(OnExposureComplete, generation, exposureMillis, Timeout.Infinite);
                     }
                     LogMessage("StartExposure", $"Exposure timing initiated.");
 
@@ -1335,14 +1281,58 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 LogMessage("StopExposure", $"Request received. Current state: {cameraState}");
                 if (cameraState == CameraStates.cameraExposing)
                 {
-                    LogMessage("StopExposure", "StopExposure not currently supported.");
                     exposureTimer?.Dispose(); exposureTimer = null;
-                    cameraState = CameraStates.cameraIdle;
+                    CancelActiveExposure();
+                    cameraState = CameraStates.cameraWaiting;
                     imageReady = false;
-                    throw new MethodNotImplementedException("StopExposure");
+                    int generation = exposureGeneration;
+                    Task.Run(() => PollForImage(generation));
                 }
                 else { LogMessage("StopExposure", "No exposure in progress to stop."); }
             }
+        }
+
+        private static void CancelActiveExposure()
+        {
+            int mode = activeExposureIsBulb
+                ? FujifilmSdkWrapper.XSDK_RELEASE_N_BULBS1OFF
+                : FujifilmSdkWrapper.XSDK_RELEASE_CANCEL;
+            int status;
+            int result = FujifilmSdkWrapper.XSDK_Release(hCamera, mode, IntPtr.Zero, out status);
+            LogMessage("CancelActiveExposure", $"Release mode 0x{mode:X} returned {result}, status={status}.");
+            activeExposureIsBulb = false;
+        }
+
+        private static async Task DrainAbortedExposure(int generation)
+        {
+            int discarded = 0;
+            for (int attempt = 0; attempt < 12; attempt++)
+            {
+                if (!IsConnected) return;
+                try
+                {
+                    int pending;
+                    int total;
+                    int result = FujifilmSdkWrapper.XSDK_GetBufferCapacity(hCamera, out pending, out total);
+                    while (result == FujifilmSdkWrapper.XSDK_COMPLETE && pending > 0 && discarded < 8)
+                    {
+                        if (FujifilmSdkWrapper.XSDK_DeleteImage(hCamera) != FujifilmSdkWrapper.XSDK_COMPLETE) break;
+                        discarded++;
+                        result = FujifilmSdkWrapper.XSDK_GetBufferCapacity(hCamera, out pending, out total);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogMessage("DrainAbortedExposure", ex.Message);
+                }
+                await Task.Delay(250).ConfigureAwait(false);
+            }
+            lock (exposureLock)
+            {
+                if (generation == exposureGeneration && cameraState == CameraStates.cameraWaiting && !imageReady)
+                    cameraState = CameraStates.cameraIdle;
+            }
+            LogMessage("DrainAbortedExposure", $"Discarded {discarded} stale frame(s).");
         }
 
         #endregion
@@ -1389,67 +1379,21 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         // *** NEW: Load configuration from JSON file ***
         private static void LoadConfiguration(string modelName)
         {
-            // Basic sanitization of model name to use as filename
-            string safeModelName = new string(modelName.Where(ch => char.IsLetterOrDigit(ch) || ch == '-').ToArray());
-            if (string.IsNullOrWhiteSpace(safeModelName))
-            {
-                LogMessage("LoadConfiguration", $"Error: Invalid model name '{modelName}' for creating filename.");
-                currentConfig = null;
-                return;
-            }
-
-            string configFileName = $"{safeModelName}.json";
-            // Determine the path to the configuration file.
-            // This might be relative to the driver DLL, or a specific config directory.
-            // Example: Assuming JSON files are in the same directory as the driver DLL.
-            string driverPath = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-            string configFilePath = Path.Combine(driverPath, configFileName);
-
-            LogMessage("LoadConfiguration", $"Attempting to load configuration from: {configFilePath}");
-
-            if (!File.Exists(configFilePath))
-            {
-                LogMessage("LoadConfiguration", $"Error: Configuration file not found: {configFilePath}");
-                currentConfig = null;
-                return;
-            }
-
             try
             {
-                string jsonString = File.ReadAllText(configFilePath);
-                // Using System.Text.Json for deserialization (requires .NET Core 3.1+ or .NET 5+)
-                // If using older .NET Framework, you might need Newtonsoft.Json (Json.NET)
-                var options = new JsonSerializerOptions
-                {
-                    PropertyNameCaseInsensitive = true // Handle potential case differences in JSON keys
-                };
-                currentConfig = JsonSerializer.Deserialize<CameraConfig>(jsonString, options);
-
-                if (currentConfig == null)
-                {
-                    LogMessage("LoadConfiguration", $"Error: Failed to deserialize JSON from {configFilePath}.");
-                    return;
-                }
-
-                // Populate defaults from config if they exist
+                string driverPath = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                currentConfig = CameraModelCatalog.Load(driverPath, modelName,
+                    message => LogMessage("LoadConfiguration", message));
                 cameraXSize = currentConfig.CameraXSize;
                 cameraYSize = currentConfig.CameraYSize;
                 pixelSizeX = currentConfig.PixelSizeX;
                 pixelSizeY = currentConfig.PixelSizeY;
                 maxAdu = currentConfig.MaxAdu;
-                // Note: Sensitivity and Exposure Min/Max will be overwritten by SDK query later
-                // but we keep the defaults from JSON as a fallback
-
                 LogMessage("LoadConfiguration", $"Successfully loaded and parsed config for {currentConfig.ModelName}.");
-            }
-            catch (JsonException jsonEx)
-            {
-                LogMessage("LoadConfiguration", $"JSON Parsing Error in {configFilePath}: {jsonEx.Message}");
-                currentConfig = null;
             }
             catch (Exception ex)
             {
-                LogMessage("LoadConfiguration", $"Error loading configuration file {configFilePath}: {ex.Message}");
+                LogMessage("LoadConfiguration", $"Unable to load a configuration for '{modelName}': {ex.Message}");
                 currentConfig = null;
             }
         }
@@ -1472,7 +1416,8 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 // Optionally throw an exception or set default fallbacks here
                 // For now, using hardcoded fallbacks as before, but logging critical error
                 minSensitivity = 100; maxSensitivity = 12800; supportedSensitivities.Clear();
-                minExposure = 0.0001; maxExposure = 60.0; bulbCapable = true; supportedShutterSpeeds.Clear();
+                minExposure = 0.0001; maxTimedExposure = 60.0; maxExposure = 3600.0;
+                bulbCapable = true; supportedShutterSpeeds.Clear();
                 return;
             }
 
@@ -1486,50 +1431,13 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             // --- Get Sensitivity (Gain) Capabilities ---
             try
             {
-                int drToQuery = FujifilmSdkWrapper.XSDK_DRANGE_100; // Use base DR 100%
-
-                // *** Explicitly Get/Set Dynamic Range before querying Sensitivity ***
-                try
-                {
-                    int currentDR = -1;
-                    int getDrResult = FujifilmSdkWrapper.XSDK_GetDRange(hCamera, out currentDR);
-                    if (getDrResult == FujifilmSdkWrapper.XSDK_COMPLETE)
-                    {
-                        LogMessage("CacheCameraCapabilities", $"Current camera Dynamic Range before setting: {currentDR}");
-                    }
-                    else
-                    {
-                        // Log warning but proceed, maybe setting it will still work
-                        LogMessage("CacheCameraCapabilities", $"Warning: Failed to get current Dynamic Range (Result: {getDrResult}). Attempting to set DR {drToQuery} anyway.");
-                        FujifilmSdkWrapper.CheckSdkError(hCamera, getDrResult, "XSDK_GetDRange (Non-fatal)"); // Log full error details
-                    }
-
-                    LogMessage("CacheCameraCapabilities", $"Explicitly setting Dynamic Range to {drToQuery}...");
-                    int setDrResult = FujifilmSdkWrapper.XSDK_SetDRange(hCamera, drToQuery);
-                    // Check if setting DR failed, log but maybe CapSensitivity still works? Or throw? Let's throw for now.
-                    FujifilmSdkWrapper.CheckSdkError(hCamera, setDrResult, $"XSDK_SetDRange({drToQuery})");
-                    LogMessage("CacheCameraCapabilities", $"Dynamic Range set to {drToQuery} successfully.");
-
-                    // Add a small delay after setting DR just in case
-                    System.Threading.Thread.Sleep(100); // 100ms delay
-
-                }
-                catch (Exception drEx)
-                {
-                    LogMessage("CacheCameraCapabilities", $"CRITICAL: Failed to get/set Dynamic Range before querying sensitivity: {drEx.Message}. Aborting sensitivity query.");
-                    // If we can't set the DR, querying sensitivity for that DR is likely pointless/dangerous
-                    throw; // Re-throw the exception to indicate a failure in caching capabilities
-                }
-
-                // *** Now query Sensitivity using the standard helper ***
-                LogMessage("CacheCameraCapabilities", $"Querying Sensitivity for DR={drToQuery}...");
-                int[] sdkSensitivities = FujifilmSdkWrapper.GetIntArrayFromSdkSensitivity(hCamera, drToQuery); // Uses standard two-call helper
+                LogMessage("CacheCameraCapabilities", "Querying fixed sensitivity values...");
+                int[] sdkSensitivities = FujifilmSdkWrapper.GetIntArrayFromSdkSensitivity(hCamera);
 
                 // Process results as before...
                 if (sdkSensitivities != null && sdkSensitivities.Length > 0)
                 {
-                    supportedSensitivities = sdkSensitivities.Where(s => s >= 0).ToList(); // Filter out negative AUTO values
-                    supportedSensitivities.Sort();
+                    supportedSensitivities = FujifilmCapabilities.FixedSensitivities(sdkSensitivities).ToList();
                     if (supportedSensitivities.Count > 0) { minSensitivity = supportedSensitivities.Min(); maxSensitivity = supportedSensitivities.Max(); LogMessage("CacheCameraCapabilities", $"Sensitivity Range: Min={minSensitivity}, Max={maxSensitivity}. Count={supportedSensitivities.Count}"); }
                     else { LogMessage("CacheCameraCapabilities", "Warning: SDK returned sensitivities, but all were filtered out. Using defaults."); /* Fallback */ minSensitivity = currentConfig.DefaultMinSensitivity; maxSensitivity = currentConfig.DefaultMaxSensitivity; supportedSensitivities.Clear(); }
                 }
@@ -1550,16 +1458,21 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     supportedShutterSpeeds = sdkShutterCodes.ToList();
                     LogMessage("CacheCameraCapabilities", $"Retrieved {supportedShutterSpeeds.Count} shutter speed codes. SDK Bulb Capable: {sdkBulbCapable}");
 
+                    sdkShutterSpeedToDuration = new Dictionary<int, double>(
+                        FujifilmCapabilities.BuildShutterMap(
+                            supportedShutterSpeeds,
+                            currentConfig.ShutterSpeedMap,
+                            code => LogMessage("CacheCameraCapabilities", $"Ignoring undocumented shutter code {code}.")));
+                    durationToSdkShutterSpeed.Clear();
+                    foreach (var pair in sdkShutterSpeedToDuration.OrderBy(pair => pair.Value))
+                    {
+                        if (!durationToSdkShutterSpeed.ContainsKey(pair.Value))
+                            durationToSdkShutterSpeed[pair.Value] = pair.Key;
+                    }
+
                     // *** MODIFIED: Fallback logic for bulbCapable ***
-                    if (!sdkBulbCapable && currentConfig.DefaultBulbCapable)
-                    {
-                        LogMessage("CacheCameraCapabilities", $"WARNING: SDK reported Bulb NOT capable, but config default is TRUE. Using config default.");
-                        bulbCapable = true; // Override with JSON default
-                    }
-                    else
-                    {
-                        bulbCapable = sdkBulbCapable; // Use SDK value
-                    }
+                    bulbCapable = FujifilmCapabilities.ResolveBulbCapability(
+                        sdkBulbCapable, currentConfig.DefaultBulbCapable);
                     LogMessage("CacheCameraCapabilities", $"Final Bulb Capable setting: {bulbCapable}");
                     // *** END MODIFIED ***
 
@@ -1576,13 +1489,17 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     {
                         minExposure = validDurations.Min();
                         // *** MODIFIED: maxExposure now represents the longest *programmable* time ***
-                        maxExposure = validDurations.Max();
-                        LogMessage("CacheCameraCapabilities", $"Exposure Range (Programmable): Min={minExposure}s, Max={maxExposure}s");
+                        maxTimedExposure = validDurations.Max();
+                        maxExposure = bulbCapable
+                            ? Math.Max(maxTimedExposure, currentConfig.DefaultMaxExposure)
+                            : maxTimedExposure;
+                        LogMessage("CacheCameraCapabilities", $"Exposure Range: Min={minExposure}s, TimedMax={maxTimedExposure}s, Max={maxExposure}s");
                     }
                     else
                     {
                         LogMessage("CacheCameraCapabilities", "Warning: No supported shutter codes found in the pre-defined map. Using defaults.");
                         minExposure = currentConfig.DefaultMinExposure;
+                        maxTimedExposure = 60.0;
                         maxExposure = currentConfig.DefaultMaxExposure;
                     }
                 }
@@ -1590,6 +1507,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 {
                     LogMessage("CacheCameraCapabilities", "Warning: Failed to get shutter speed list from SDK or list was empty. Using defaults.");
                     minExposure = currentConfig.DefaultMinExposure;
+                    maxTimedExposure = 60.0;
                     maxExposure = currentConfig.DefaultMaxExposure;
                     bulbCapable = currentConfig.DefaultBulbCapable; // Use JSON default if SDK fails
                     supportedShutterSpeeds.Clear();
@@ -1599,6 +1517,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             {
                 LogMessage("CacheCameraCapabilities", $"Error getting shutter speed capabilities: {ex.Message}. Using defaults.");
                 minExposure = currentConfig.DefaultMinExposure;
+                maxTimedExposure = 60.0;
                 maxExposure = currentConfig.DefaultMaxExposure;
                 bulbCapable = currentConfig.DefaultBulbCapable; // Use JSON default if SDK fails
                 supportedShutterSpeeds.Clear();
@@ -1606,8 +1525,8 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
             // Update other capabilities if needed (e.g., CanAbortExposure, CanStopExposure)
             // For now, keeping them as they were:
-            canAbortExposure = false;
-            canStopExposure = false;
+            canAbortExposure = true;
+            canStopExposure = true;
             canPulseGuide = false; // Assuming no pulse guiding
 
             LogMessage("CacheCameraCapabilities", "Capability caching finished.");
@@ -1700,24 +1619,14 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             {
                 // Check bulb capability using the 'bulbCapable' field populated during CacheCameraCapabilities
                 // ** maxExposure here represents the longest *programmable* shutter speed **
-                if (bulbCapable && duration > maxExposure)
+                if (bulbCapable && duration > maxTimedExposure)
                 {
-                    LogMessage("DurationToSdkShutterSpeed", $"Duration {duration}s > max programmable ({maxExposure}s), mapping to BULB/TIME (-1).");
+                    LogMessage("DurationToSdkShutterSpeed", $"Duration {duration}s > max programmable ({maxTimedExposure}s), mapping to BULB/TIME (-1).");
                     return FujifilmSdkWrapper.XSDK_SHUTTER_BULB; // Return -1 to indicate Bulb/Time needed
                 }
                 LogMessage("DurationToSdkShutterSpeed", $"Duration {duration}s is too far from nearest supported {closestDuration}s (Diff: {minDiff}, Tol: {tolerance}).");
                 throw new InvalidValueException($"Requested duration {duration}s is not supported or too far from nearest value {closestDuration}s.");
             }
-        }
-
-        // *** RE-ADDED: Helper to check if model likely has physical T-dial ***
-        private static bool IsPhysicalDialModel(string modelName)
-        {
-            if (string.IsNullOrEmpty(modelName)) return false;
-            // Add known models with physical T dials here (covers X-T and X-Pro)
-            return modelName.StartsWith("X-T", StringComparison.OrdinalIgnoreCase) ||
-                   modelName.StartsWith("X-Pro", StringComparison.OrdinalIgnoreCase);
-            // GFX and X-S models typically use PASM dials and rely on SDK Bulb mode
         }
 
         // *** RE-ADDED: Helper to get the SDK code for the longest mapped duration ***
@@ -1735,19 +1644,18 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         // *** UPDATED: Timer callback specifically for BULB exposures ***
         private static void OnBulbExposureTimerElapsed(object state)
         {
+            int generation = state is int ? (int)state : -1;
             // *** Ensure the entire method is locked ***
             lock (exposureLock)
             {
-                if (cameraState != CameraStates.cameraExposing)
+                if (generation != exposureGeneration || cameraState != CameraStates.cameraExposing)
                 {
                     LogMessage("OnBulbExposureTimerElapsed", $"Timer fired but state is {cameraState}. Ignoring.");
                     return;
                 }
                 LogMessage("OnBulbExposureTimerElapsed", $"BULB timer fired for {lastExposureDuration}s. Attempting to STOP exposure using combined command XSDK_RELEASE_N_BULBS1OFF (0x{FujifilmSdkWrapper.XSDK_RELEASE_N_BULBS1OFF:X}).");
 
-                // Allocate memory for the long* parameters (pShotOpt and pStatus)
                 IntPtr shotOptPtr = IntPtr.Zero;
-                IntPtr statusPtr = IntPtr.Zero; // Allocate for status too
                 bool stopSuccess = false; // Flag to track if stop sequence likely worked
 
                 try
@@ -1759,15 +1667,8 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                         return;
                     }
 
-                    // Add delay *before* sending stop command
-                    LogMessage("OnBulbExposureTimerElapsed", "Adding delay before sending stop command...");
-                    System.Threading.Thread.Sleep(500); // Try 500ms delay
-
-                    // Allocate memory for the long parameters
-                    shotOptPtr = Marshal.AllocHGlobal(sizeof(long));
-                    statusPtr = Marshal.AllocHGlobal(sizeof(long)); // Allocate for status
-                    Marshal.WriteInt64(shotOptPtr, 0L); // Initialize pShotOpt value to 0
-                    Marshal.WriteInt64(statusPtr, 0L);  // Initialize pStatus value to 0
+                    shotOptPtr = Marshal.AllocHGlobal(sizeof(int));
+                    Marshal.WriteInt32(shotOptPtr, 0);
 
                     // Send the combined BULB STOP command
                     int releaseModeStopBulb = FujifilmSdkWrapper.XSDK_RELEASE_N_BULBS1OFF; // Use 0x000C
@@ -1794,9 +1695,9 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     // Now check for the image data using the helper method
                     if (stopSuccess)
                     {
-                        // *** START POLLING TASK ***
+                        cameraState = CameraStates.cameraWaiting;
                         LogMessage("OnBulbExposureTimerElapsed", "Starting background task to poll for image data...");
-                        Task.Run(() => PollForBulbImage());
+                        Task.Run(() => PollForImage(generation));
                         // The camera state will be set to Idle or Error by the polling task
                         // We don't call CheckForImageData directly here anymore.
                     }
@@ -1818,7 +1719,6 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 {
                     // Free the allocated memory for the pointers used in the Release call
                     if (shotOptPtr != IntPtr.Zero) Marshal.FreeHGlobal(shotOptPtr);
-                    if (statusPtr != IntPtr.Zero) Marshal.FreeHGlobal(statusPtr);
 
                     // *** IMPORTANT: Do NOT set cameraState here. The polling task will handle it. ***
                     // // Ensure state moves away from exposing if not already error/idle
@@ -1834,31 +1734,45 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         }
 
         // *** NEW: Background task to poll for image after bulb stop ***
-        private static async Task PollForBulbImage()
+        private static async Task PollForImage(int generation)
         {
             const int pollIntervalMs = 500; // Check every 500ms
             const int timeoutSeconds = 15; // Give up after 15 seconds
             Stopwatch stopwatch = Stopwatch.StartNew();
             bool foundImage = false;
 
-            LogMessage("PollForBulbImage", $"Polling started. Timeout: {timeoutSeconds}s, Interval: {pollIntervalMs}ms");
+            LogMessage("PollForImage", $"Polling started. Timeout: {timeoutSeconds}s, Interval: {pollIntervalMs}ms");
 
             while (stopwatch.Elapsed.TotalSeconds < timeoutSeconds)
             {
+                lock (exposureLock)
+                {
+                    if (generation != exposureGeneration)
+                    {
+                        LogMessage("PollForImage", "A newer exposure superseded this poll.");
+                        return;
+                    }
+                }
                 // Check if connected before calling CheckForImageData
                 lock (hardwareLock) // Use hardwareLock for checking IsConnected
                 {
                     if (!IsConnected)
                     {
-                        LogMessage("PollForBulbImage", "Disconnected during polling. Aborting poll.");
-                        // State should likely already be handled by disconnect logic, but ensure error state
-                        lock (exposureLock) { cameraState = CameraStates.cameraError; imageReady = false; }
+                        LogMessage("PollForImage", "Disconnected during polling. Aborting poll.");
+                        lock (exposureLock)
+                        {
+                            if (generation == exposureGeneration)
+                            {
+                                cameraState = CameraStates.cameraError;
+                                imageReady = false;
+                            }
+                        }
                         return; // Exit the task
                     }
                 }
 
                 // Call CheckForImageData - this will acquire its own lock
-                CheckForImageData();
+                CheckForImageData(generation);
 
                 // Check if the image became ready (use lock for thread safety)
                 lock (exposureLock)
@@ -1866,7 +1780,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     if (imageReady)
                     {
                         foundImage = true;
-                        LogMessage("PollForBulbImage", $"Image found after {stopwatch.Elapsed.TotalSeconds:F1}s. Polling successful.");
+                        LogMessage("PollForImage", $"Image found after {stopwatch.Elapsed.TotalSeconds:F1}s. Polling successful.");
                         // CheckForImageData already set state to Idle
                         break; // Exit the loop
                     }
@@ -1883,7 +1797,8 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             {
                 lock (exposureLock)
                 {
-                    LogMessage("PollForBulbImage", $"Polling timed out after {timeoutSeconds}s. Image not found.");
+                    if (generation != exposureGeneration) return;
+                    LogMessage("PollForImage", $"Polling timed out after {timeoutSeconds}s. Image not found.");
                     cameraState = CameraStates.cameraError; // Set error state on timeout
                     imageReady = false;
                 }
@@ -1910,47 +1825,31 @@ namespace ASCOM.ScdouglasFujifilm.Camera
         // *** MODIFIED: Original callback now only for TIMED exposures ***
         private static void OnExposureComplete(object state)
         {
-            // *** Retrieve and free the shotOptPtr passed via timer state ***
-            IntPtr shotOptPtr = IntPtr.Zero;
-            if (state is IntPtr ptrState)
-            {
-                shotOptPtr = ptrState;
-                LogMessage("OnExposureComplete", $"Retrieved shotOptPtr {shotOptPtr} from timer state.");
-            }
-            else
-            {
-                // This case should ideally not happen if StartExposure always passes a pointer
-                LogMessage("OnExposureComplete", $"Warning: Timer state was not an IntPtr! Cannot free original shotOptPtr.");
-            }
-
+            int generation = state is int ? (int)state : -1;
             lock (exposureLock)
             {
-                if (cameraState != CameraStates.cameraExposing)
+                if (generation != exposureGeneration || cameraState != CameraStates.cameraExposing)
                 {
-                    // This might happen if AbortExposure was called, or if it's a bulb exposure handled elsewhere
                     LogMessage("OnExposureComplete", $"Timer fired but state is {cameraState}. Ignoring.");
-                    // Free pointer even if ignoring
-                    if (shotOptPtr != IntPtr.Zero) Marshal.FreeHGlobal(shotOptPtr);
                     return;
                 }
-                LogMessage("OnExposureComplete", $"TIMED/T-Dial exposure timer fired for {lastExposureDuration}s. Checking for image availability.");
-                CheckForImageData(); // Call the common image check logic
+                cameraState = CameraStates.cameraWaiting;
+                LogMessage("OnExposureComplete", $"Timed exposure completed after {lastExposureDuration}s. Polling for RAW data.");
             }
-
-            // *** Free pointer after lock released ***
-            if (shotOptPtr != IntPtr.Zero)
-            {
-                Marshal.FreeHGlobal(shotOptPtr);
-                LogMessage("OnExposureComplete", $"Freed original shotOptPtr {shotOptPtr}.");
-            }
+            Task.Run(() => PollForImage(generation));
         }
 
         // *** NEW: Helper method to check for image data ***
-        private static void CheckForImageData()
+        private static void CheckForImageData(int generation)
         {
             // This logic was previously in OnExposureComplete
             lock (exposureLock) // Ensure lock is held
             {
+                if (generation != exposureGeneration)
+                {
+                    LogMessage("CheckForImageData", "A newer exposure superseded this image check.");
+                    return;
+                }
                 LogMessage("CheckForImageData", $"Checking image buffer.");
                 try
                 {
@@ -1965,16 +1864,26 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                     int result = FujifilmSdkWrapper.XSDK_ReadImageInfo(hCamera, out imgInfo);
                     if (result == FujifilmSdkWrapper.XSDK_COMPLETE && imgInfo.lDataSize > 0)
                     {
-                        LogMessage("CheckForImageData", $"Image detected in buffer via ReadImageInfo. Size: {imgInfo.lDataSize}, Format: {imgInfo.lFormat:X}");
-                        imageReady = true;
-                        cameraState = CameraStates.cameraIdle; // Set to Idle, ImageReady indicates download needed
+                        if (!FujifilmCapabilities.IsRawImageFormat(imgInfo.lFormat))
+                        {
+                            LogMessage("CheckForImageData", $"Discarding non-RAW frame. Size={imgInfo.lDataSize}, Format=0x{imgInfo.lFormat:X}.");
+                            FujifilmSdkWrapper.XSDK_DeleteImage(hCamera);
+                            imageReady = false;
+                            cameraState = CameraStates.cameraWaiting;
+                        }
+                        else
+                        {
+                            LogMessage("CheckForImageData", $"RAW image detected. Size: {imgInfo.lDataSize}, Format: 0x{imgInfo.lFormat:X}");
+                            imageReady = true;
+                            activeExposureIsBulb = false;
+                            cameraState = CameraStates.cameraIdle;
+                        }
                     }
                     else
                     {
                         // Log if no image found, but don't necessarily treat as error yet
                         LogMessage("CheckForImageData", $"No image data found via ReadImageInfo (Result: {result}). Client needs to poll ImageReady or retry download.");
-                        // Keep state as Idle, ImageReady false. Client might retry Get ImageArray.
-                        cameraState = CameraStates.cameraIdle;
+                        cameraState = CameraStates.cameraWaiting;
                         imageReady = false;
                         // Optionally check for specific non-zero results from ReadImageInfo if they indicate errors vs just 'not ready'
                     }
@@ -2022,10 +1931,7 @@ namespace ASCOM.ScdouglasFujifilm.Camera
 
                 // --- Check Format using loaded config ---
                 // *** MODIFIED: Check against ALL configured RAW codes ***
-                bool isRawFormat = (imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRaw ||
-                                    imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRawFine ||
-                                    imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRawNormal ||
-                                    imgInfo.lFormat == currentConfig.SdkConstants.ImageQualityRawSuperfine);
+                bool isRawFormat = FujifilmCapabilities.IsRawImageFormat(imgInfo.lFormat);
                 // Add more checks here if other formats can also represent RAW for different models
 
                 if (!isRawFormat)

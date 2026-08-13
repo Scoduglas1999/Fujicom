@@ -1,11 +1,11 @@
 {
-  "ModelName": "GFX100",
+  "ModelName": "GFX100SII",
   "CameraXSize": 11648,
   "CameraYSize": 8736,
   "PixelSizeX": 3.76,
   "PixelSizeY": 3.76,
   "MaxAdu": 65535,
-  "DefaultMinSensitivity": 100,
+  "DefaultMinSensitivity": 80,
   "DefaultMaxSensitivity": 12800,
   "DefaultMinExposure": 0.0000625,
   "DefaultMaxExposure": 3600.0,
@@ -14,11 +14,8 @@
     "ModeManual": 1,
     "FocusModeManual": 1,
     "ImageQualityRaw": 1,
-    "ImageQualityFine": 2,
-    "ImageQualityNormal": 3,
     "ImageQualityRawFine": 4,
     "ImageQualityRawNormal": 5,
-    "ImageQualitySuperfine": 6,
     "ImageQualityRawSuperfine": 7
   }
 }
