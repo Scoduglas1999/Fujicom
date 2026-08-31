@@ -21,6 +21,19 @@ namespace ASCOM.ScdouglasFujifilm.Camera.Core
                 .ToList();
         }
 
+        /// <summary>
+        /// Maps a requested ISO onto the nearest value the body actually reports. The driver runs in
+        /// ASCOM "Gain Value" mode, so clients may send any integer between GainMin and GainMax rather
+        /// than one of the camera's fixed steps. Ties prefer the lower ISO. When no fixed values are
+        /// known the request is returned unchanged.
+        /// </summary>
+        internal static int NearestSensitivity(IEnumerable<int> supported, int requested)
+        {
+            var candidates = (supported ?? Enumerable.Empty<int>()).Where(value => value > 0).Distinct().ToArray();
+            if (candidates.Length == 0) return requested;
+            return candidates.OrderBy(value => Math.Abs(value - requested)).ThenBy(value => value).First();
+        }
+
         internal static bool IsRawImageFormat(int format)
         {
             // Bits 0x0f00 are orientation. The low byte is the actual image format.

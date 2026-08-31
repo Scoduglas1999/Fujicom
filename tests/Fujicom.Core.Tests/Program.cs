@@ -10,6 +10,8 @@ internal static class Program
         try
         {
             Run("fixed ISO filtering", TestFixedIsoFiltering);
+            Run("nearest supported ISO", TestNearestSensitivity);
+            Run("single ASCOM gain mode", TestSingleAscomGainMode);
             Run("rotated RAW recognition", TestRawFormats);
             Run("bulb capability fallback", TestBulbFallback);
             Run("long and T-mode shutter map", TestLongShutterMap);
@@ -31,6 +33,38 @@ internal static class Program
     {
         var actual = FujifilmCapabilities.FixedSensitivities(new[] { -10, 160, 320, -1, 160, 640, 51200 });
         Equal("160,320,640", string.Join(",", actual));
+    }
+
+    private static void TestNearestSensitivity()
+    {
+        var supported = new[] { 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600 };
+        Equal(800, FujifilmCapabilities.NearestSensitivity(supported, 800));
+        Equal(800, FujifilmCapabilities.NearestSensitivity(supported, 850));
+        Equal(1000, FujifilmCapabilities.NearestSensitivity(supported, 950));
+        Equal(640, FujifilmCapabilities.NearestSensitivity(supported, 720)); // equidistant: prefer the lower ISO
+        Equal(160, FujifilmCapabilities.NearestSensitivity(supported, 1));
+        Equal(1600, FujifilmCapabilities.NearestSensitivity(supported, 25600));
+        Equal(1234, FujifilmCapabilities.NearestSensitivity(Array.Empty<int>(), 1234));
+        Equal(1234, FujifilmCapabilities.NearestSensitivity(null, 1234));
+    }
+
+    private static void TestSingleAscomGainMode()
+    {
+        // Regression guard for issue #8: the COM-facing driver must expose exactly one ASCOM gain mode.
+        // Gain Value mode => GainMin/GainMax are implemented and Gains throws PropertyNotImplementedException.
+        string source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "Fuji", "CameraDriver", "CameraDriver.cs"));
+        True(Member(source, "public ArrayList Gains").Contains("throw new PropertyNotImplementedException(\"Gains\", false)"),
+            "Gains must throw PropertyNotImplementedException while Gain is an ISO value.");
+        False(Member(source, "public short GainMin").Contains("PropertyNotImplementedException"));
+        False(Member(source, "public short GainMax").Contains("PropertyNotImplementedException"));
+    }
+
+    private static string Member(string source, string declaration)
+    {
+        int start = source.IndexOf(declaration, StringComparison.Ordinal);
+        True(start >= 0, "Missing member: " + declaration);
+        int next = source.IndexOf("\n        public ", start + declaration.Length, StringComparison.Ordinal);
+        return next < 0 ? source.Substring(start) : source.Substring(start, next - start);
     }
 
     private static void TestRawFormats()
