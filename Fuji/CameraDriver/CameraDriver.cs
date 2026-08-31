@@ -935,7 +935,11 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             }
         }
 
-        /// <summary>Gets or sets the camera gain (or gain index).</summary>
+        /// <summary>
+        /// Gets or sets the camera ISO. This driver operates in ASCOM "Gain Value" mode, so this is the
+        /// ISO number itself (bounded by <see cref="GainMin"/> and <see cref="GainMax"/>), never an index
+        /// into <see cref="Gains"/>.
+        /// </summary>
         public short Gain
         {
             get
@@ -1009,23 +1013,19 @@ namespace ASCOM.ScdouglasFujifilm.Camera
             }
         }
 
-        /// <summary>Returns the list of supported gain names or values.</summary>
+        /// <summary>
+        /// Not implemented. ICameraV3 permits only one active gain mode, and this driver uses
+        /// "Gain Value" mode (<see cref="Gain"/> is the ISO number; <see cref="GainMin"/> and
+        /// <see cref="GainMax"/> give the range). Exposing a populated Gains list as well made clients
+        /// such as NINA treat Gain as an index into it (Gains[800]), which failed during connection
+        /// with "Index was out of range" (GitHub issue #8).
+        /// </summary>
         public ArrayList Gains
         {
             get
             {
-                try
-                {
-                    CheckConnected("Gains Get");
-                    ArrayList gains = CameraHardware.Gains; // Delegate to hardware class
-                    LogMessage("Gains Get", $"Returning {gains.Count} gain values.");
-                    return gains;
-                }
-                catch (Exception ex)
-                {
-                    LogMessage("Gains Get", $"Threw an exception: \r\n{ex}");
-                    throw; // Re-throw ASCOM exceptions
-                }
+                LogMessage("Gains Get", "Not implemented: driver uses Gain Value mode (Gain is the ISO number; see GainMin/GainMax).");
+                throw new PropertyNotImplementedException("Gains", false);
             }
         }
 

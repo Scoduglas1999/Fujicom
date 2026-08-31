@@ -27,7 +27,7 @@ Support goes toward the practical maintenance work behind the driver: camera com
 * **ASCOM ICameraV3 Compliance:** Implements the standard ASCOM interface for broad compatibility.
 * **Timed, T-mode, and Bulb Exposures:** Uses the shutter speeds reported by each body, including extended timed exposures through 60 minutes, with bulb fallback where needed.
 * **Abort and Stop Support:** Cancels an active capture and drains stale frames so a cancelled exposure cannot be returned as the next sequence image.
-* **ISO Control:** Discovers fixed ISO values from the camera while excluding Auto ISO modes.
+* **ISO Control:** Discovers fixed ISO values from the camera while excluding Auto ISO modes. ISO is exposed through ASCOM "Gain Value" mode: `Gain` is the ISO number and `GainMin`/`GainMax` give the range (the `Gains` index list is intentionally not implemented, so clients never treat `Gain` as a list index). Requests between steps snap to the nearest supported ISO.
 * **Reliable RAW Download:** Polls until a RAW frame is ready, accepts rotated RAW format codes, skips JPEG/HEIF frames, crops Fuji optical-black columns, and decodes RAF data through LibRaw.
 * **X-Trans Compatibility:** Converts X-Trans captures to a synthetic RGGB compatibility image after LibRaw demosaicing. This works with standard ASCOM clients but is not a replacement for the native RAF in calibration-sensitive workflows. GFX Bayer data remains native.
 * **Shared Camera Sessions:** Multiple ASCOM clients share one SDK session; the camera closes only when the final client disconnects.

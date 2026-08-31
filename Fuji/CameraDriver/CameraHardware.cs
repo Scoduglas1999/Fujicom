@@ -956,10 +956,12 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                 // Validate against the *discovered* min/max
                 if (value < GainMin || value > GainMax) throw new InvalidValueException("Gain", value.ToString(), $"Range {GainMin} to {GainMax}");
 
-                // Optional: Check if the value is in the *exact* list retrieved by CapSensitivity
-                if (!supportedSensitivities.Contains(value))
+                // Gain Value mode: a client may send any integer between GainMin and GainMax, so map
+                // the request onto the nearest fixed ISO the body actually reports.
+                int iso = FujifilmCapabilities.NearestSensitivity(supportedSensitivities, value);
+                if (iso != value)
                 {
-                    LogMessage("Gain Set", $"Warning: Requested ISO {value} is not in the list of explicitly supported values from CapSensitivity. Attempting to set anyway.");
+                    LogMessage("Gain Set", $"Requested ISO {value} is not one of the {supportedSensitivities.Count} fixed ISO values reported by the camera. Using nearest supported ISO {iso}.");
                 }
 
                 // *** ADDED Lock to prevent interference ***
@@ -972,41 +974,21 @@ namespace ASCOM.ScdouglasFujifilm.Camera
                         throw new ASCOM.InvalidOperationException($"Cannot set Gain while camera is {cameraState}.");
                     }
 
-                    LogMessage("Gain Set", $"Calling XSDK_SetSensitivity(hCamera={hCamera}, value={value})...");
-                    int result = FujifilmSdkWrapper.XSDK_SetSensitivity(hCamera, value);
+                    LogMessage("Gain Set", $"Calling XSDK_SetSensitivity(hCamera={hCamera}, value={iso})...");
+                    int result = FujifilmSdkWrapper.XSDK_SetSensitivity(hCamera, iso);
                     LogMessage("Gain Set", $"XSDK_SetSensitivity returned {result}");
                     FujifilmSdkWrapper.CheckSdkError(hCamera, result, "XSDK_SetSensitivity"); // This might throw if SDK fails
-                    LogMessage("Gain Set", $"SDK Sensitivity set to: {value}");
+                    LogMessage("Gain Set", $"SDK Sensitivity set to: {iso}");
                 }
             }
         }
 
-        // *** MODIFIED: Use dynamically determined min/max ***
+        // ASCOM "Gain Value" mode: Gain is the ISO number and GainMin/GainMax bound it, using the
+        // range discovered from the SDK. The Gains index list is deliberately NOT exposed: ICameraV3
+        // allows only one gain mode to be active, and clients such as NINA treat a populated Gains
+        // list as authoritative and index it with the value of Gain (Gains[800] -> out of range).
         public static short GainMax => (short)maxSensitivity;
         public static short GainMin => (short)minSensitivity;
-        public static ArrayList Gains
-        {
-            // *** MODIFIED: Use dynamically populated list ***
-            get
-            {
-                // Return empty list if capabilities couldn't be read to avoid errors
-                if (supportedSensitivities == null || supportedSensitivities.Count == 0)
-                {
-                    LogMessage("Gains Get", "Warning: supportedSensitivities list is empty or null. Returning empty ArrayList.");
-                    return new ArrayList();
-                }
-                ArrayList list = new ArrayList();
-                foreach (int iso in supportedSensitivities.OrderBy(i => i)) // Order the list for better UI presentation
-                {
-                    // Filter out negative AUTO values if they exist in the list
-                    if (iso >= 0)
-                    {
-                        list.Add(iso.ToString());
-                    }
-                }
-                return list;
-            }
-        }
         public static bool HasShutter => hasShutter;
         public static double HeatSinkTemperature => throw new PropertyNotImplementedException("HeatSinkTemperature", false);
 
